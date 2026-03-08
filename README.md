@@ -85,6 +85,12 @@ We trained and released **five BulkFormer models** at different parameter scales
 * numpy=2.0.2
 * performer-pytorch=1.1.4
 
+Platform-specific install entry points for new setups:
+
+- `envs/bulkformer_macos_mps.yaml` for macOS Apple Silicon
+- `envs/bulkformer_linux_cuda.yaml` for Linux CUDA 11.8
+- `docs/installation.md` for the exact PyTorch 2.5.1 and PyG wheel commands
+
 ## 🚀 Quick start
 **Step1: clone the repo**
 ```
@@ -95,9 +101,11 @@ git clone https://github.com/KangBoming/BulkFormer.git
 **Step2: create and activate the environment**
 ```
 cd BulkFormer
-conda env create -f bulkformer.yaml
-conda activate bulkformer
+conda env create -f envs/bulkformer_linux_cuda.yaml
+conda activate bulkformer-cuda
 ```
+
+On Apple Silicon Macs, use `envs/bulkformer_macos_mps.yaml` instead. The full platform-specific commands, PyTorch 2.5.1 wheel installs, PyG wheel installs, and MPS/CUDA verification steps are documented in `docs/installation.md`. The legacy `bulkformer.yaml` is still kept in the repo for compatibility with older setups.
 **Step3: download pretrained model and data**
 ```
 cd BulkFormer/model
@@ -113,14 +121,69 @@ cd BulkFormer
 Please follow bulkformer_extract_feature.ipynb
 ```
 
+## 🧰 Diagnostics Toolkit Preview
+
+This repo now includes a `bulkformer_dx` package for the planned diagnostics workflows. The preprocessing workflow is implemented, and the remaining command groups stay scaffolded while rollout continues.
+
+```bash
+python -m bulkformer_dx.cli --help
+python -m bulkformer_dx.cli preprocess --help
+python -m bulkformer_dx.cli anomaly --help
+```
+
+Available top-level command groups:
+
+- `preprocess`
+- `anomaly`
+- `tissue`
+- `proteomics`
+
+Current rollout status:
+
+- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, and preprocessing with BulkFormer-aligned `log1p(TPM)` export.
+- Install instructions: see `docs/installation.md`.
+- Preprocessing docs: see `docs/bulkformer-dx/preprocess.md`.
+- Still to do: BulkFormer model loading, anomaly scoring, anomaly head training, calibration, tissue workflows, proteomics workflows, and final docs/examples.
+
+Supporting docs live in `docs/bulkformer-dx/`.
+
 ## 🛠️ Developer Workflow (Ralph, Cursor by default)
 
 Ralph is the **default** way to run autonomous rollout work in this repo: fresh-context iterations with **Cursor CLI** and **external verification** (the loop stops only when quality checks and `prd.json` say all stories are done, not when the LLM says "done").
 
-- **Docs:** `docs/README.md`, `docs/development/ralph-workflow.md`
-- **Setup:** Install [Cursor CLI](https://cursor.com/docs/cli/installation) (`curl https://cursor.com/install -fsSL | bash`), run `agent login`, then copy `scripts/ralph/prd.template.json` → `scripts/ralph/prd.json` and run `./scripts/ralph/ralph.sh 10`.
+### Usage
 
-Keep `main` untouched; run Ralph on a dedicated branch named in `scripts/ralph/prd.json`; each iteration lands one focused commit.
+**One-time setup**
+
+1. Install [Cursor CLI](https://cursor.com/docs/cli/installation): `curl https://cursor.com/install -fsSL | bash`
+2. Authenticate: `agent login` (or set `CURSOR_API_KEY`)
+3. Copy templates and set your rollout branch:
+   ```bash
+   cp scripts/ralph/prd.template.json scripts/ralph/prd.json
+   cp scripts/ralph/progress.template.txt scripts/ralph/progress.txt
+   ```
+   Edit `scripts/ralph/prd.json` and set `branchName` to a dedicated branch (e.g. `ralph/bulkformer-dx-toolkit`). Create that branch from `main` and run Ralph from it.
+
+**Run the loop**
+
+```bash
+./scripts/ralph/ralph.sh 10
+```
+
+- Default backend is Cursor (`agent`). Optional: `--model grok` for a cheaper model, or `--tool amp` / `--tool claude` for other backends.
+- The script exits only when **external verification** passes: pytest (or compileall) and all stories in `prd.json` have `passes: true`. It does not stop just because the agent says "done".
+
+**Check status**
+
+- Which stories are done: `cat scripts/ralph/prd.json | jq '.userStories[] | {id, title, passes}'`
+- Run log: `cat scripts/ralph/progress.txt`
+
+**More detail**
+
+- `scripts/ralph/README.md` — options, verification, and backends
+- `docs/README.md` and `docs/development/ralph-workflow.md` — branch discipline and philosophy
+
+Keep `main` untouched; each iteration should land one focused commit on the branch named in `prd.json`.
 
 ## 📄 Publication
 A large-scale foundation model for human bulk transcriptomes
