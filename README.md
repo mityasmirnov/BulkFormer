@@ -123,7 +123,7 @@ Please follow bulkformer_extract_feature.ipynb
 
 ## 🧰 Diagnostics Toolkit Preview
 
-This repo now includes a `bulkformer_dx` package for the planned diagnostics workflows. The preprocessing workflow and the first reusable BulkFormer model-loading utilities are implemented, while the remaining command groups stay scaffolded as rollout continues.
+This repo now includes a `bulkformer_dx` package for the planned diagnostics workflows. The preprocessing workflow, reusable BulkFormer model-loading utilities, and Monte Carlo masking anomaly scoring are implemented, while the remaining command groups continue to roll out.
 
 ```bash
 python -m bulkformer_dx.cli --help
@@ -160,10 +160,11 @@ The loader resolves the pretrained checkpoint plus required graph and feature as
 
 Current rollout status:
 
-- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, and reusable BulkFormer asset/model loading plus embedding extraction utilities.
+- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, and Monte Carlo masking anomaly scoring with ranked gene outputs.
 - Install instructions: see `docs/installation.md`.
 - Preprocessing docs: see `docs/bulkformer-dx/preprocess.md`.
-- Still to do: anomaly scoring, anomaly head training, calibration, tissue workflows, proteomics workflows, and final docs/examples.
+- Anomaly scoring docs: see `docs/bulkformer-dx/anomaly.md`.
+- Still to do: anomaly head training, calibration, tissue workflows, proteomics workflows, and final docs/examples.
 
 Supporting docs live in `docs/bulkformer-dx/`.
 
