@@ -1,0 +1,8 @@
+# Ralph Progress Log
+Started: [replace when run starts]
+---
+
+## Codebase Patterns
+- Keep large checkpoints, downloaded data, and machine-specific paths out of commits.
+- Reuse existing notebook logic and model internals from `bulkformer_extract_feature.ipynb`, `utils/`, and `model/` before introducing parallel implementations.
+- Keep stories small and aligned to the planned commit boundaries so each iteration can finish with passing checks.

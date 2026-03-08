@@ -113,6 +113,15 @@ cd BulkFormer
 Please follow bulkformer_extract_feature.ipynb
 ```
 
+## 🛠️ Developer Workflow (Ralph, Cursor by default)
+
+Ralph is the **default** way to run autonomous rollout work in this repo: fresh-context iterations with **Cursor CLI** and **external verification** (the loop stops only when quality checks and `prd.json` say all stories are done, not when the LLM says "done").
+
+- **Docs:** `docs/README.md`, `docs/development/ralph-workflow.md`
+- **Setup:** Install [Cursor CLI](https://cursor.com/docs/cli/installation) (`curl https://cursor.com/install -fsSL | bash`), run `agent login`, then copy `scripts/ralph/prd.template.json` → `scripts/ralph/prd.json` and run `./scripts/ralph/ralph.sh 10`.
+
+Keep `main` untouched; run Ralph on a dedicated branch named in `scripts/ralph/prd.json`; each iteration lands one focused commit.
+
 ## 📄 Publication
 A large-scale foundation model for human bulk transcriptomes
 

@@ -1,0 +1,151 @@
+{
+  "project": "BulkFormer",
+  "branchName": "ralph/bulkformer-dx-toolkit",
+  "description": "BulkFormer diagnostics toolkit rollout using fresh-context Ralph iterations.",
+  "notes": "The vendor-ralph setup story is intended to land before or alongside the broader rollout. The remaining stories map to the planned implementation sequence.",
+  "userStories": [
+    {
+      "id": "vendor-ralph",
+      "title": "Vendor Ralph assets and document the rollout workflow",
+      "description": "As a maintainer, I want a repo-local Ralph workflow so future implementation can run with fresh context and documented branch discipline.",
+      "acceptanceCriteria": [
+        "Vendor Ralph runner and prompts under scripts/ralph",
+        "Add repo-specific PRD and progress templates",
+        "Document the branch and commit workflow in repo docs"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This is the setup pass for the rest of the rollout."
+    },
+    {
+      "id": "scaffold-bulkformer-dx",
+      "title": "Scaffold the bulkformer_dx package and CLI entrypoints",
+      "description": "As a developer, I need the diagnostics package structure in place so downstream features land into stable modules and tests.",
+      "acceptanceCriteria": [
+        "Create bulkformer_dx package with __init__.py and cli.py",
+        "Add command-group placeholders for preprocess, anomaly, tissue, and proteomics",
+        "Create initial tests and docs placeholders"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Commit boundary 1 of the planned rollout."
+    },
+    {
+      "id": "portable-env-specs",
+      "title": "Add macOS and Linux environment specs",
+      "description": "As a user, I want portable environment files and installation guidance for MPS and CUDA so setup is reproducible.",
+      "acceptanceCriteria": [
+        "Add envs/bulkformer_macos_mps.yaml and envs/bulkformer_linux_cuda.yaml",
+        "Keep bulkformer.yaml unchanged",
+        "Document exact PyTorch 2.5.1 and PyG install guidance plus MPS verification notes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Commit boundary 2."
+    },
+    {
+      "id": "preprocess-module",
+      "title": "Implement preprocessing with TPM alignment and reports",
+      "description": "As a user, I want raw counts converted into BulkFormer-aligned inputs with explicit masking semantics.",
+      "acceptanceCriteria": [
+        "Load raw counts and Gencode-backed gene length annotations",
+        "Compute TPM then log1p(TPM) and align to the BulkFormer vocabulary with -10 fill",
+        "Export valid-gene masks and preprocessing reports with unit tests for math and alignment"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Commit boundary 3."
+    },
+    {
+      "id": "model-loading",
+      "title": "Implement BulkFormer asset discovery and model loading",
+      "description": "As a user, I want to load local or downloaded BulkFormer assets reliably across supported model variants.",
+      "acceptanceCriteria": [
+        "Discover required graph and feature assets with clear missing-file errors",
+        "Support variant-aware config selection including the local 37M checkpoint",
+        "Add checkpoint cleanup, graph construction, embedding extraction, and a smoke test path"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Commit boundary 4."
+    },
+    {
+      "id": "ranking-anomaly-scoring",
+      "title": "Add ranking-only anomaly scoring",
+      "description": "As a researcher, I want cohort-level anomaly scores and ranked genes using BulkFormer masking semantics.",
+      "acceptanceCriteria": [
+        "Use Monte Carlo masking only across valid genes with default mask_prob=0.15",
+        "Preserve BulkFormer -10 masking semantics",
+        "Emit cohort score tables, per-sample ranked gene files, and QC summaries with tests"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Commit boundary 5."
+    },
+    {
+      "id": "anomaly-head",
+      "title": "Implement the anomaly uncertainty head",
+      "description": "As a researcher, I want a frozen-backbone anomaly head with a documented default path for uncertainty-aware scoring.",
+      "acceptanceCriteria": [
+        "Implement the sigma/NLL head as the default supported mode",
+        "Keep injected-outlier training as an explicitly synthetic optional mode",
+        "Document the frozen-backbone assumption"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Commit boundary 6."
+    },
+    {
+      "id": "cohort-calibration",
+      "title": "Add empirical cohort calibration",
+      "description": "As a user, I want calibrated anomaly outputs with a clearly documented approximation path where needed.",
+      "acceptanceCriteria": [
+        "Implement empirical residual calibration first",
+        "Use BY per-sample correction by default",
+        "Clearly label any negative-binomial count-space path as an approximation"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Commit boundary 7."
+    },
+    {
+      "id": "tissue-validation",
+      "title": "Implement tissue train and predict flows",
+      "description": "As a user, I want tissue validation workflows driven by BulkFormer embeddings and serialized sklearn artifacts.",
+      "acceptanceCriteria": [
+        "Support train and predict CLI flows",
+        "Use BulkFormer embeddings with optional PCA and RandomForestClassifier",
+        "Persist the sklearn artifacts needed for inference"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Commit boundary 8."
+    },
+    {
+      "id": "proteomics-workflow",
+      "title": "Implement proteomics training and inference",
+      "description": "As a user, I want frozen transcriptome embeddings to drive protein prediction workflows with masked loss and residual ranking.",
+      "acceptanceCriteria": [
+        "Support linear and MLP heads on frozen transcriptome embeddings",
+        "Handle missing protein targets with masked losses",
+        "Add residual ranking outputs and optional calibration files"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Commit boundary 9."
+    },
+    {
+      "id": "final-docs-and-examples",
+      "title": "Finalize docs and examples",
+      "description": "As a user, I want runnable examples and clear reference docs for the new toolkit.",
+      "acceptanceCriteria": [
+        "Add docs and examples covering CLI usage and expected input schemas",
+        "Document Ensembl ID/version handling and GPU versus MPS notes",
+        "Add lightweight repo-local config templates"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Commit boundary 10."
+    }
+  ]
+}
