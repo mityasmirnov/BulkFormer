@@ -105,6 +105,7 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
 
     head_parser = anomaly_subparsers.add_parser(
         "head",
+        aliases=["train-head"],
         help="Train a small anomaly head on frozen BulkFormer embeddings.",
     )
     head_parser.add_argument(

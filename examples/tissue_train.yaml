@@ -1,0 +1,11 @@
+input: preprocess_out/aligned_log1p_tpm.tsv
+labels: /path/to/tissue_labels.tsv
+output_dir: tissue_train
+valid_gene_mask: preprocess_out/valid_gene_mask.tsv
+bulkformer:
+  variant: 37M
+  device: cpu
+classifier:
+  aggregation: mean
+  pca_components: 128
+  n_estimators: 256

@@ -48,3 +48,13 @@ def test_tissue_help_lists_train_predict_and_artifact_options() -> None:
     assert "predict" in result.stdout
     assert "--labels" in result.stdout
     assert "--artifact-path" in result.stdout
+
+
+def test_proteomics_help_lists_train_predict_and_artifact_options() -> None:
+    result = run_cli("proteomics", "--help")
+
+    assert result.returncode == 0
+    assert "train" in result.stdout
+    assert "predict" in result.stdout
+    assert "--proteomics" in result.stdout
+    assert "--artifact-path" in result.stdout

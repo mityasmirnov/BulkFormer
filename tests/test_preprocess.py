@@ -13,6 +13,7 @@ import pandas as pd
 from bulkformer_dx.preprocess import (
     align_to_bulkformer_genes,
     counts_to_tpm,
+    load_gene_lengths,
     normalize_ensembl_id,
 )
 
@@ -79,6 +80,21 @@ def test_align_to_bulkformer_genes_fills_missing_entries_and_emits_mask() -> Non
         {"ensg_id": "ENSG2", "is_valid": 0, "is_missing_fill": 1},
         {"ensg_id": "ENSG3", "is_valid": 1, "is_missing_fill": 0},
     ]
+
+
+def test_load_gene_lengths_can_fall_back_to_genomic_span(tmp_path: Path) -> None:
+    annotation_path = tmp_path / "annotation.tsv"
+    annotation_path.write_text(
+        "gene_id\tstart\tend\n"
+        "ENSG1.1\t100\t199\n"
+        "ENSG2\t500\t749\n",
+        encoding="utf-8",
+    )
+
+    gene_lengths, metadata = load_gene_lengths(annotation_path)
+
+    assert gene_lengths == {"ENSG1": 100.0, "ENSG2": 250.0}
+    assert metadata["length_strategy"] == "genomic_span_from_start_end"
 
 
 def test_preprocess_cli_writes_outputs_and_normalizes_gene_ids(tmp_path: Path) -> None:

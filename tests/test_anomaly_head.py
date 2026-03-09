@@ -13,6 +13,7 @@ import pytest
 import torch
 
 from bulkformer_dx.anomaly import head
+from bulkformer_dx.cli import build_parser
 
 
 def test_gaussian_nll_loss_matches_closed_form() -> None:
@@ -74,6 +75,25 @@ def test_train_head_model_supports_injected_outlier_mode() -> None:
     assert result.mode == "injected_outlier"
     assert result.metrics["train_examples"] == 4
     assert result.metrics["train_accuracy"] >= 0.95
+
+
+def test_anomaly_head_parser_defaults_to_sigma_nll() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "anomaly",
+            "head",
+            "--input",
+            "aligned.tsv",
+            "--valid-gene-mask",
+            "valid_gene_mask.tsv",
+            "--output-dir",
+            "head_out",
+        ]
+    )
+
+    assert args.mode == "sigma_nll"
 
 
 def test_run_trains_sigma_head_and_writes_artifacts(
@@ -158,4 +178,78 @@ def test_run_trains_sigma_head_and_writes_artifacts(
 
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert metrics["mode"] == "sigma_nll"
+    assert metrics["train_examples"] == 4
+
+
+def test_run_trains_injected_outlier_head_and_writes_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expression = pd.DataFrame(
+        [[10.0, 20.0, -10.0], [14.0, 23.0, -10.0]],
+        columns=["ENSG1", "ENSG2", "ENSG3"],
+    )
+    expression.insert(0, "sample_id", ["sample_a", "sample_b"])
+    expression_path = tmp_path / "aligned.tsv"
+    expression.to_csv(expression_path, sep="\t", index=False)
+
+    valid_gene_mask = pd.DataFrame(
+        {
+            "ensg_id": ["ENSG1", "ENSG2", "ENSG3"],
+            "is_valid": [1, 1, 0],
+        }
+    )
+    valid_gene_mask_path = tmp_path / "valid_gene_mask.tsv"
+    valid_gene_mask.to_csv(valid_gene_mask_path, sep="\t", index=False)
+
+    monkeypatch.setattr(
+        head,
+        "load_bulkformer_model",
+        lambda **_: SimpleNamespace(model=object(), device="cpu"),
+    )
+    monkeypatch.setattr(
+        head,
+        "extract_gene_embeddings",
+        lambda *_args, **_kwargs: np.array(
+            [
+                [[1.0, 0.0], [0.0, 1.0], [9.0, 9.0]],
+                [[2.0, 0.0], [0.0, 2.0], [9.0, 9.0]],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+    output_dir = tmp_path / "head_outputs"
+    exit_code = head.run(
+        argparse.Namespace(
+            input=str(expression_path),
+            valid_gene_mask=str(valid_gene_mask_path),
+            output_dir=str(output_dir),
+            mode="injected_outlier",
+            variant="37M",
+            checkpoint_path=None,
+            graph_path=None,
+            graph_weights_path=None,
+            gene_embedding_path=None,
+            gene_info_path=None,
+            device="cpu",
+            batch_size=8,
+            hidden_dim=4,
+            epochs=25,
+            learning_rate=0.1,
+            weight_decay=0.0,
+            min_sigma=1e-3,
+            injection_rate=1.0,
+            outlier_scale=3.0,
+            random_seed=0,
+        )
+    )
+
+    assert exit_code == 0
+    checkpoint_path = output_dir / "injected_outlier_head.pt"
+    metrics_path = output_dir / "training_metrics.json"
+    assert checkpoint_path.exists()
+    assert metrics_path.exists()
+
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["mode"] == "injected_outlier"
     assert metrics["train_examples"] == 4

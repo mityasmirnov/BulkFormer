@@ -1,0 +1,8 @@
+input: preprocess_out/aligned_log1p_tpm.tsv
+proteomics: /path/to/heldout_proteomics.tsv
+artifact_path: proteomics_train/protein_head.pt
+output_dir: proteomics_predict
+bulkformer:
+  device: cpu
+ranking:
+  alpha: 0.05

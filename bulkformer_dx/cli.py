@@ -13,8 +13,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bulkformer-dx",
         description=(
-            "BulkFormer diagnostics toolkit. This scaffold exposes the planned "
-            "command groups while implementation is still in progress."
+            "BulkFormer diagnostics toolkit for RNA preprocessing, anomaly "
+            "ranking/calibration, tissue validation, and frozen-backbone "
+            "proteomics prediction."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")

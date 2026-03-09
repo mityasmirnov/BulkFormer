@@ -124,7 +124,7 @@ Please follow bulkformer_extract_feature.ipynb
 
 ## 🧰 Diagnostics Toolkit Preview
 
-This repo now includes a `bulkformer_dx` package for the planned diagnostics workflows. The preprocessing workflow, reusable BulkFormer model-loading utilities, and Monte Carlo masking anomaly scoring are implemented, while the remaining command groups continue to roll out.
+This repo now includes a `bulkformer_dx` package for RNA preprocessing, BulkFormer-based anomaly discovery, tissue validation, and frozen-backbone proteomics prediction.
 
 ```bash
 python -m bulkformer_dx.cli --help
@@ -159,14 +159,20 @@ embeddings = extract_sample_embeddings(
 
 The loader resolves the pretrained checkpoint plus required graph and feature assets, strips common checkpoint wrapper prefixes like `module.`, and reuses the repo's existing `utils/BulkFormer.py` implementation. In auto-discovery mode it prefers a local `BulkFormer_37M.pt` checkpoint when present, which keeps the lightweight variant easy to use during development.
 
-Current rollout status:
+Diagnostics workflow status:
 
-- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, Monte Carlo masking anomaly scoring with ranked gene outputs, and frozen-backbone anomaly head training with sigma/NLL plus optional injected-outlier modes.
-- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, Monte Carlo masking anomaly scoring with ranked gene outputs, frozen-backbone anomaly head training with sigma/NLL plus optional injected-outlier modes, and cohort calibration with empirical p-values plus BY correction and an optional NB approximation.
-- Install instructions: see `docs/installation.md`.
-- Preprocessing docs: see `docs/bulkformer-dx/preprocess.md`.
-- Anomaly scoring docs: see `docs/bulkformer-dx/anomaly.md`.
-- Still to do: tissue workflows, proteomics workflows, and final docs/examples.
+- `preprocess`: counts -> TPM -> `log1p(TPM)` plus BulkFormer gene alignment.
+- `anomaly`: Monte Carlo masking ranking, sigma-NLL or injected-outlier heads, and cohort calibration with BY correction.
+- `tissue`: BulkFormer embeddings plus optional PCA and random forest train/predict workflows.
+- `proteomics`: frozen BulkFormer transcriptome embeddings, linear/MLP protein heads, masked regression, residual ranking, and optional BY-adjusted protein calls.
+
+Key docs:
+
+- Install overview: `docs/installation.md`
+- Apple Silicon / MPS: `docs/INSTALL_mac_m1.md`
+- Linux CUDA 11.8: `docs/INSTALL_linux_cuda.md`
+- RNA anomaly pipeline: `docs/PIPELINE_rna_anomaly.md`
+- Proteomics pipeline: `docs/PIPELINE_proteomics.md`
 
 Supporting docs live in `docs/bulkformer-dx/`.
 
