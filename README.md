@@ -162,12 +162,13 @@ The loader resolves the pretrained checkpoint plus required graph and feature as
 Diagnostics workflow status:
 
 - `preprocess`: counts -> TPM -> `log1p(TPM)` plus BulkFormer gene alignment.
-- `anomaly`: Monte Carlo masking ranking, sigma-NLL or injected-outlier heads, and cohort calibration with BY correction.
+- `anomaly`: Monte Carlo masking ranking, sigma-NLL or injected-outlier heads, cohort calibration with BY correction, and normalized absolute outlier calls.
 - `tissue`: BulkFormer embeddings plus optional PCA and random forest train/predict workflows.
 - `proteomics`: frozen BulkFormer transcriptome embeddings, linear/MLP protein heads, masked regression, residual ranking, and optional BY-adjusted protein calls.
 
 Key docs:
 
+- Implementation summary: `docs/bulkformer-dx/implementation-summary.md`
 - Install overview: `docs/installation.md`
 - Apple Silicon / MPS: `docs/INSTALL_mac_m1.md`
 - Linux CUDA 11.8: `docs/INSTALL_linux_cuda.md`

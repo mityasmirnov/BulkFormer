@@ -59,6 +59,24 @@ distribution for each gene, then applies Benjamini-Yekutieli correction within e
 default. This keeps the primary path empirical and non-parametric while still giving each sample a
 multiple-testing-aware ranking.
 
+In addition to the existing empirical residual ranking, calibration now emits an explicit normalized
+absolute-outlier table using:
+
+`z = (Y - mu) / (sigma + 1e-6)`
+
+where:
+
+- `Y` is the observed `log1p(TPM)`
+- `mu` is the BulkFormer expected expression (`mean_predicted_expression`)
+- `sigma` is the cohort-derived robust residual scale for the current implementation
+
+Two-sided p-values are computed as:
+
+`p = 2 * norm.sf(abs(z))`
+
+and then adjusted within each sample using Benjamini-Yekutieli, which is the default because gene
+expression measurements are correlated.
+
 Inputs:
 
 - `--scores`: path to the anomaly scoring output directory or its `ranked_genes/` subdirectory.
@@ -66,12 +84,17 @@ Inputs:
 - `--count-space-method`: optional count-space support path. `none` keeps the workflow purely
   empirical. `nb_approx` adds a TPM-derived negative-binomial approximation and is explicitly
   labeled as approximate rather than raw-count inference.
+- `--alpha`: significance threshold applied to the BY-adjusted normalized absolute-outlier calls.
 
 Outputs:
 
 - `ranked_genes/<sample>.tsv`: calibrated ranked tables with `empirical_p_value` and `by_q_value`.
+- `absolute_outliers.tsv`: flattened normalized outlier table with `sample_id`, `gene`,
+  `observed_log1p_tpm`, `expected_mu`, `expected_sigma`, `z_score`, `raw_p_value`,
+  `by_adj_p_value`, and `is_significant`. The `gene` column uses the Ensembl-style identifiers
+  carried through the BulkFormer-aligned matrix.
 - `calibration_summary.tsv`: per-sample summary including minimum empirical/BY values and the count
-  of BY-significant genes.
+  of BY-significant genes, plus normalized absolute-outlier significance counts.
 - `calibration_run.json`: run metadata plus an approximation note when `nb_approx` is enabled.
 
 Example:
@@ -80,6 +103,7 @@ Example:
 python -m bulkformer_dx.cli anomaly calibrate \
   --scores output/anomaly \
   --output-dir output/anomaly_calibrated \
+  --alpha 0.05 \
   --count-space-method nb_approx
 ```
 

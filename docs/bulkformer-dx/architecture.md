@@ -39,7 +39,9 @@ RNA anomaly, tissue, and proteomics workflows.
 - `bulkformer_dx/anomaly/calibration.py`
   - loads ranked gene tables from anomaly scoring
   - computes empirical per-gene cohort-tail p-values
+  - computes normalized absolute outlier z-scores and two-sided p-values
   - applies per-sample Benjamini-Yekutieli correction
+  - writes `absolute_outliers.tsv` as a flattened cohort-wide absolute-call table
   - optionally adds a TPM-derived negative-binomial approximation
 
 - `bulkformer_dx/tissue.py`
@@ -97,6 +99,7 @@ flowchart TD
 
     RankedGenes --> Calibration[anomaly/calibration.py]
     Calibration --> CalibratedCalls[CalibratedCalls]
+    Calibration --> AbsoluteOutliers[AbsoluteOutliers]
 
     AlignedRNA --> Tissue[tissue.py]
     BulkFormerModel --> Tissue

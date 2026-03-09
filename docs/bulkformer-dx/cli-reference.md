@@ -85,10 +85,12 @@ Main arguments:
 - `--scores`: anomaly output directory or `ranked_genes/`
 - `--output-dir`
 - `--count-space-method`: `none` or `nb_approx`
+- `--alpha`: significance threshold for normalized absolute outlier calls
 
 Outputs:
 
 - `ranked_genes/<sample>.tsv`
+- `absolute_outliers.tsv`
 - `calibration_summary.tsv`
 - `calibration_run.json`
 

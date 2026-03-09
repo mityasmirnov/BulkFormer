@@ -20,6 +20,7 @@ All four workflows are now implemented with unit tests and working CLIs:
 
 ## Read This Next
 
+- `implementation-summary.md`: unified summary of the implementations and repo modifications
 - `architecture.md`: how the package is organized internally
 - `cli-reference.md`: top-level CLI inventory and output contracts
 - `preprocess.md`: counts normalization and alignment details

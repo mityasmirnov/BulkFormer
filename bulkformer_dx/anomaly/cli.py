@@ -243,6 +243,12 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
             "approximation and is clearly labeled as approximate."
         ),
     )
+    calibrate_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=calibration.DEFAULT_ALPHA,
+        help="BY-adjusted significance threshold for normalized absolute outlier calls.",
+    )
     calibrate_parser.set_defaults(func=calibration.run)
 
     parser.set_defaults(func=run)

@@ -9,6 +9,7 @@
 ## Diagnostics Toolkit
 
 - [BulkFormer Diagnostics Toolkit](bulkformer-dx/README.md): overview of the `bulkformer_dx` package and current rollout status.
+- [Implementation Summary](bulkformer-dx/implementation-summary.md): unified summary of the toolkit implementations and repo modifications completed so far.
 - [Diagnostics Architecture](bulkformer-dx/architecture.md): module-level architecture, data flow, and artifact contracts.
 - [Diagnostics CLI Reference](bulkformer-dx/cli-reference.md): command-by-command argument and output reference.
 - [Preprocess Workflow](bulkformer-dx/preprocess.md): counts loading, TPM normalization, `log1p(TPM)`, and BulkFormer alignment usage.

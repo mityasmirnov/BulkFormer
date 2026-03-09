@@ -55,10 +55,26 @@ def test_calibrate_ranked_gene_scores_adds_empirical_pvalues() -> None:
 
     assert "empirical_p_value" in sample_a.columns
     assert "by_q_value" in sample_a.columns
+    assert "expected_sigma" in sample_a.columns
+    assert "z_score" in sample_a.columns
+    assert "raw_p_value" in sample_a.columns
+    assert "by_adj_p_value" in sample_a.columns
+    assert "is_significant" in sample_a.columns
     assert np.isclose(sample_a.loc[0, "empirical_p_value"], 0.2)
     assert np.isclose(sample_a.loc[0, "by_q_value"], 0.6)
     assert np.isclose(sample_a.loc[1, "empirical_p_value"], 1.0)
     assert sample_a.loc[0, "empirical_p_value"] < sample_a.loc[1, "empirical_p_value"]
+    assert set(result.absolute_outliers.columns) >= {
+        "sample_id",
+        "gene",
+        "observed_log1p_tpm",
+        "expected_mu",
+        "expected_sigma",
+        "z_score",
+        "raw_p_value",
+        "by_adj_p_value",
+        "is_significant",
+    }
 
 
 def test_calibrate_ranked_gene_scores_can_add_nb_approximation() -> None:
@@ -110,6 +126,22 @@ def test_calibrate_parser_defaults_to_empirical_path() -> None:
     )
 
     assert args.count_space_method == "none"
+    assert args.alpha == 0.05
+
+
+def test_compute_normalized_outliers_supports_single_sample_inputs() -> None:
+    result = calibration.compute_normalized_outliers(
+        observed_log1p_tpm=np.array([[3.0, 7.0]], dtype=float),
+        expected_mu=np.array([[1.0, 7.0]], dtype=float),
+        expected_sigma=np.array([[1.0, 2.0]], dtype=float),
+        gene_names=["ENSG1", "ENSG2"],
+        sample_names=["sample_a"],
+    )
+
+    assert result["sample_id"].tolist() == ["sample_a", "sample_a"]
+    assert result["gene"].tolist() == ["ENSG1", "ENSG2"]
+    assert np.isclose(result.loc[0, "z_score"], 2.0)
+    assert np.isclose(result.loc[1, "z_score"], 0.0)
 
 
 def test_run_writes_calibration_outputs(tmp_path: Path) -> None:
@@ -136,11 +168,14 @@ def test_run_writes_calibration_outputs(tmp_path: Path) -> None:
             scores=str(scores_dir),
             output_dir=str(output_dir),
             count_space_method="nb_approx",
+            alpha=0.05,
         )
     )
 
     assert exit_code == 0
     assert (output_dir / "ranked_genes" / "sample_a.tsv").exists()
+    assert (output_dir / "absolute_outliers.tsv").exists()
     assert (output_dir / "calibration_summary.tsv").exists()
     metadata = json.loads((output_dir / "calibration_run.json").read_text(encoding="utf-8"))
     assert metadata["count_space_method"] == "nb_approx"
+    assert metadata["alpha"] == 0.05
