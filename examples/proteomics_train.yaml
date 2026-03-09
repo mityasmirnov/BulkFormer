@@ -1,0 +1,17 @@
+input: preprocess_out/aligned_log1p_tpm.tsv
+proteomics: /path/to/fibroblast_proteomics.tsv
+output_dir: proteomics_train
+valid_gene_mask: preprocess_out/valid_gene_mask.tsv
+bulkformer:
+  variant: 37M
+  device: cpu
+head:
+  head_type: mlp
+  hidden_dim: 256
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_size: 16
+targets:
+  already_log2: true
+  center_scale: true

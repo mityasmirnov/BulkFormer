@@ -29,6 +29,8 @@ GENE_LENGTH_COLUMN_CANDIDATES = (
     "gene_length_bp",
     "gene_length_base_pairs",
 )
+GENOMIC_START_COLUMN_CANDIDATES = ("start", "gene_start", "tx_start")
+GENOMIC_END_COLUMN_CANDIDATES = ("end", "gene_end", "tx_end")
 
 
 @dataclass(slots=True)
@@ -159,7 +161,7 @@ def load_gene_lengths(
     *,
     gene_id_column: str | None = None,
     length_column: str | None = None,
-) -> tuple[dict[str, float], dict[str, int]]:
+) -> tuple[dict[str, float], dict[str, int | str]]:
     """Load gene lengths keyed by normalized Ensembl gene identifiers."""
     annotation_table = _read_table(annotation_path)
     if annotation_table.empty:
@@ -170,14 +172,36 @@ def load_gene_lengths(
         GENE_ID_COLUMN_CANDIDATES,
         "gene ID",
     )
-    resolved_length_column = length_column or _resolve_column(
-        annotation_table.columns,
-        GENE_LENGTH_COLUMN_CANDIDATES,
-        "gene length",
-    )
-
     gene_ids = annotation_table[resolved_gene_id_column].map(normalize_ensembl_id)
-    lengths = pd.to_numeric(annotation_table[resolved_length_column], errors="coerce")
+    length_strategy = "explicit_length_column"
+    resolved_length_column = length_column
+    if resolved_length_column is None:
+        try:
+            resolved_length_column = _resolve_column(
+                annotation_table.columns,
+                GENE_LENGTH_COLUMN_CANDIDATES,
+                "gene length",
+            )
+        except ValueError:
+            resolved_length_column = None
+
+    if resolved_length_column is not None:
+        lengths = pd.to_numeric(annotation_table[resolved_length_column], errors="coerce")
+    else:
+        resolved_start_column = _resolve_column(
+            annotation_table.columns,
+            GENOMIC_START_COLUMN_CANDIDATES,
+            "gene start",
+        )
+        resolved_end_column = _resolve_column(
+            annotation_table.columns,
+            GENOMIC_END_COLUMN_CANDIDATES,
+            "gene end",
+        )
+        starts = pd.to_numeric(annotation_table[resolved_start_column], errors="coerce")
+        ends = pd.to_numeric(annotation_table[resolved_end_column], errors="coerce")
+        lengths = ends - starts + 1.0
+        length_strategy = "genomic_span_from_start_end"
     cleaned = pd.DataFrame({"gene_id": gene_ids, "gene_length": lengths}).dropna()
     cleaned = cleaned.loc[cleaned["gene_length"] > 0]
     if cleaned.empty:
@@ -191,6 +215,7 @@ def load_gene_lengths(
         "annotation_rows": int(len(annotation_table)),
         "usable_gene_lengths": int(len(gene_lengths)),
         "duplicate_gene_ids": duplicate_gene_ids,
+        "length_strategy": length_strategy,
     }
     return gene_lengths, metadata
 
@@ -306,6 +331,7 @@ def preprocess_counts(
         "annotation_rows": annotation_metadata["annotation_rows"],
         "usable_annotation_gene_lengths": annotation_metadata["usable_gene_lengths"],
         "duplicate_annotation_gene_ids": annotation_metadata["duplicate_gene_ids"],
+        "annotation_length_strategy": annotation_metadata["length_strategy"],
         "genes_missing_annotation_length": len(genes_missing_lengths),
         "genes_missing_annotation_length_examples": genes_missing_lengths[:10],
         "bulkformer_gene_count": len(gene_panel),

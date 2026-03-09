@@ -1,0 +1,13 @@
+counts: /path/to/raw_counts.tsv
+annotation: /path/to/gene_annotation_v29.tsv
+output_dir: preprocess_out
+bulkformer:
+  variant: 37M
+  device: cpu
+anomaly:
+  mc_passes: 16
+  mask_prob: 0.15
+  output_dir: anomaly_out
+calibration:
+  output_dir: anomaly_calibrated
+  count_space_method: none
