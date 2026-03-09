@@ -171,6 +171,8 @@ Key docs:
 - Install overview: `docs/installation.md`
 - Apple Silicon / MPS: `docs/INSTALL_mac_m1.md`
 - Linux CUDA 11.8: `docs/INSTALL_linux_cuda.md`
+- Diagnostics architecture: `docs/bulkformer-dx/architecture.md`
+- Diagnostics CLI reference: `docs/bulkformer-dx/cli-reference.md`
 - RNA anomaly pipeline: `docs/PIPELINE_rna_anomaly.md`
 - Proteomics pipeline: `docs/PIPELINE_proteomics.md`
 

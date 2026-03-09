@@ -18,4 +18,13 @@ All four workflows are now implemented with unit tests and working CLIs:
 - `tissue`: embedding extraction, PCA, random forest training, and prediction.
 - `proteomics`: frozen BulkFormer embeddings, linear/MLP heads, masked regression, residual ranking, and optional BY-adjusted protein calls.
 
+## Read This Next
+
+- `architecture.md`: how the package is organized internally
+- `cli-reference.md`: top-level CLI inventory and output contracts
+- `preprocess.md`: counts normalization and alignment details
+- `anomaly.md`: scoring, small heads, and calibration
+- `tissue.md`: tissue training and prediction
+- `proteomics.md`: RNA-to-proteomics prediction and protein outlier ranking
+
 See the workflow docs in this directory for end-to-end command examples.

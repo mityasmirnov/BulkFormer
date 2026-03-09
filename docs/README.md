@@ -9,6 +9,8 @@
 ## Diagnostics Toolkit
 
 - [BulkFormer Diagnostics Toolkit](bulkformer-dx/README.md): overview of the `bulkformer_dx` package and current rollout status.
+- [Diagnostics Architecture](bulkformer-dx/architecture.md): module-level architecture, data flow, and artifact contracts.
+- [Diagnostics CLI Reference](bulkformer-dx/cli-reference.md): command-by-command argument and output reference.
 - [Preprocess Workflow](bulkformer-dx/preprocess.md): counts loading, TPM normalization, `log1p(TPM)`, and BulkFormer alignment usage.
 - [Anomaly Workflow](bulkformer-dx/anomaly.md): anomaly scoring, frozen-backbone head training, and cohort calibration docs.
 - [Tissue Workflow](bulkformer-dx/tissue.md): tissue validation training and prediction docs.
