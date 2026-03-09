@@ -26,4 +26,32 @@ python -m bulkformer_dx.cli anomaly score \
   --device cpu
 ```
 
-The uncertainty head and cohort calibration subcommands are still placeholders and will be implemented in later rollout steps.
+## Anomaly Head
+
+The `anomaly head` workflow trains a small MLP on top of frozen BulkFormer gene embeddings.
+The recommended default is `--mode sigma_nll`, which learns a Gaussian mean and sigma for
+per-gene residuals using an NLL objective. An optional `--mode injected_outlier` path trains a
+binary classifier against synthetic gene-level perturbations for controlled experiments.
+
+Example:
+
+```bash
+python -m bulkformer_dx.cli anomaly head \
+  --input output/aligned_log1p_tpm.tsv \
+  --valid-gene-mask output/valid_gene_mask.tsv \
+  --output-dir output/anomaly_head \
+  --mode sigma_nll \
+  --variant 37M \
+  --device cpu
+```
+
+Outputs:
+
+- `<mode>_head.pt`: trained head checkpoint plus basic metadata.
+- `training_metrics.json`: compact training metrics for the selected objective.
+
+The underlying BulkFormer backbone stays frozen during head training.
+
+## Calibration
+
+The cohort calibration subcommand is still a placeholder and will be implemented in a later rollout step.

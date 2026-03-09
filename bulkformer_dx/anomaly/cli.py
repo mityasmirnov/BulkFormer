@@ -105,10 +105,118 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
 
     head_parser = anomaly_subparsers.add_parser(
         "head",
-        help="Planned anomaly head training workflow.",
+        help="Train a small anomaly head on frozen BulkFormer embeddings.",
     )
-    head_parser.add_argument("--train-table", help="Path to a training manifest or table.")
-    head_parser.add_argument("--output-dir", help="Directory for head checkpoints.")
+    head_parser.add_argument(
+        "--input",
+        "--train-table",
+        dest="input",
+        required=True,
+        help="Path to the BulkFormer-aligned sample-by-gene input table.",
+    )
+    head_parser.add_argument(
+        "--valid-gene-mask",
+        required=True,
+        help="Path to the valid_gene_mask.tsv file emitted by preprocessing.",
+    )
+    head_parser.add_argument(
+        "--output-dir",
+        required=True,
+        help="Directory for trained head checkpoints and metrics.",
+    )
+    head_parser.add_argument(
+        "--mode",
+        choices=head.SUPPORTED_HEAD_MODES,
+        default=head.DEFAULT_HEAD_MODE,
+        help="Head objective to train. Sigma/NLL is the recommended default baseline.",
+    )
+    head_parser.add_argument(
+        "--variant",
+        help="BulkFormer model variant to load, such as 37M or 147M.",
+    )
+    head_parser.add_argument(
+        "--checkpoint-path",
+        help="Optional path to a specific BulkFormer checkpoint.",
+    )
+    head_parser.add_argument(
+        "--graph-path",
+        default=None,
+        help="Optional path to the BulkFormer graph asset.",
+    )
+    head_parser.add_argument(
+        "--graph-weights-path",
+        default=None,
+        help="Optional path to the BulkFormer graph weights asset.",
+    )
+    head_parser.add_argument(
+        "--gene-embedding-path",
+        default=None,
+        help="Optional path to the BulkFormer ESM2 gene embedding asset.",
+    )
+    head_parser.add_argument(
+        "--gene-info-path",
+        default=None,
+        help="Optional path to the BulkFormer gene info table.",
+    )
+    head_parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Torch device for feature extraction and head training.",
+    )
+    head_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Batch size used for frozen BulkFormer feature extraction and head training.",
+    )
+    head_parser.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=head.DEFAULT_HIDDEN_DIM,
+        help="Hidden dimension for the small anomaly head MLP.",
+    )
+    head_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=head.DEFAULT_EPOCHS,
+        help="Number of optimization epochs for head training.",
+    )
+    head_parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=head.DEFAULT_LEARNING_RATE,
+        help="Learning rate for AdamW during head training.",
+    )
+    head_parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=head.DEFAULT_WEIGHT_DECAY,
+        help="Weight decay applied during head training.",
+    )
+    head_parser.add_argument(
+        "--min-sigma",
+        type=float,
+        default=head.DEFAULT_MIN_SIGMA,
+        help="Minimum sigma clamp for the sigma/NLL head.",
+    )
+    head_parser.add_argument(
+        "--injection-rate",
+        type=float,
+        default=head.DEFAULT_INJECTION_RATE,
+        help="Fraction of valid sample-gene positions to perturb in injected-outlier mode.",
+    )
+    head_parser.add_argument(
+        "--outlier-scale",
+        type=float,
+        default=head.DEFAULT_OUTLIER_SCALE,
+        help="Per-gene standard-deviation multiplier used for synthetic outliers.",
+    )
+    head_parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=0,
+        help="Random seed for synthetic labels and head training.",
+    )
     head_parser.set_defaults(func=head.run)
 
     calibrate_parser = anomaly_subparsers.add_parser(

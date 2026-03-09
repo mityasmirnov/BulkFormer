@@ -1,83 +1,116 @@
 # Installation
 
-Use the platform-specific environment files in `envs/` for new installs. The legacy `bulkformer.yaml` is kept unchanged for compatibility with older setups.
+Use the platform-specific environment files in `envs/` for all new installs. The top-level
+`bulkformer.yaml` remains in the repo only as a legacy compatibility export and is not the
+recommended setup path.
+
+The canonical flow is:
+
+1. Create or update the base conda environment from the platform YAML.
+2. Bootstrap the pinned PyTorch and PyG stack with `scripts/dev/bootstrap_env.sh`.
+3. Verify the resulting environment with `scripts/dev/verify_env.sh`.
+
+`mamba` is recommended because it is faster and produces more predictable solves than classic
+`conda`, but the commands below work with either.
 
 ## macOS (Apple Silicon, MPS)
 
 Create the base environment:
 
 ```bash
-conda env create -f envs/bulkformer_macos_mps.yaml
-conda activate bulkformer-mps
+mamba env create -f envs/bulkformer_macos_mps.yaml
 ```
 
-Install PyTorch 2.5.1:
+If the environment already exists, update it in place:
 
 ```bash
-python -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+mamba env update -n bulkformer-mps -f envs/bulkformer_macos_mps.yaml --prune
 ```
 
-Install PyTorch Geometric and its wheel-backed extensions:
+Install the pinned PyTorch 2.5.1 and PyG stack:
 
 ```bash
-python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.5.1+cpu.html
-python -m pip install torch-geometric==2.6.1
+./scripts/dev/bootstrap_env.sh bulkformer-mps macos-mps
 ```
 
-Verify that MPS is visible to PyTorch:
+Verify the environment end to end:
 
 ```bash
-python -c "import torch; print({'mps_built': torch.backends.mps.is_built(), 'mps_available': torch.backends.mps.is_available()})"
-python -c "import torch; x = torch.ones(2, device='mps'); print(x.device, x.tolist())"
+./scripts/dev/verify_env.sh bulkformer-mps macos-mps
 ```
 
 Notes:
 
-- MPS requires Apple Silicon and a recent macOS release. Intel Macs will not expose the `mps` device.
-- The PyG wheels above are the CPU wheel set for `torch==2.5.1`; they install cleanly on macOS, but some graph ops may still need CPU fallback even when PyTorch itself sees `mps`.
-- If you hit unsupported-op errors during graph execution, rerun on CPU or switch to the Linux CUDA setup below for the most reliable full-model execution.
+- MPS requires Apple Silicon and a recent macOS release. Intel Macs will not expose the `mps`
+  device.
+- The PyG wheel set for macOS uses the CPU wheel channel for `torch==2.5.1`; PyTorch itself can
+  still see `mps`, but some graph-heavy operations may need CPU fallback.
+- On conda-based macOS installs, PyG may still emit warnings about optional extension libraries
+  loading from a different Python framework path. `verify_env.sh` now checks that
+  `torch_geometric.typing.SparseTensor` remains available despite those warnings.
+- If you hit unsupported-op errors during model execution, rerun the model on CPU or use the
+  Linux CUDA path below for the most reliable full-model execution.
 
 ## Linux (CUDA 11.8)
 
 Create the base environment:
 
 ```bash
-conda env create -f envs/bulkformer_linux_cuda.yaml
-conda activate bulkformer-cuda
+mamba env create -f envs/bulkformer_linux_cuda.yaml
 ```
 
-Install PyTorch 2.5.1 with CUDA 11.8 wheels:
+If the environment already exists, update it in place:
 
 ```bash
-python -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu118
+mamba env update -n bulkformer-cuda -f envs/bulkformer_linux_cuda.yaml --prune
 ```
 
-Install PyTorch Geometric and its CUDA 11.8 extensions:
+Install the pinned PyTorch 2.5.1 and PyG CUDA 11.8 stack:
 
 ```bash
-python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.5.1+cu118.html
-python -m pip install torch-geometric==2.6.1
+./scripts/dev/bootstrap_env.sh bulkformer-cuda linux-cuda
 ```
 
-Verify that CUDA is available:
+Verify the environment end to end:
 
 ```bash
-nvidia-smi
-python -c "import torch; print({'cuda_available': torch.cuda.is_available(), 'cuda_version': torch.version.cuda, 'device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None})"
+./scripts/dev/verify_env.sh bulkformer-cuda linux-cuda
 ```
 
 Notes:
 
-- These commands target the same `torch==2.5.1` release used by this repo, pinned to CUDA 11.8 for the PyG extension wheels.
-- Make sure your NVIDIA driver supports CUDA 11.8-compatible runtime wheels before installing.
-- For remote servers, prefer running inside a fresh shell after `conda activate` so `python -m pip` resolves into the new environment.
+- These commands pin the torch family to CUDA 11.8 so the PyG extension wheels remain compatible.
+- Make sure the host NVIDIA driver supports CUDA 11.8 runtime wheels before bootstrapping.
+- `verify_env.sh` prints `nvidia-smi` when available and still performs the torch CUDA check even
+  if `nvidia-smi` is absent from `PATH`.
 
-## Quick sanity check
+## CI-like Usage Without Activation
 
-After either install path completes, confirm the core stack imports:
+If you want a shell-independent workflow, prefer `conda run` over relying on activation:
 
 ```bash
-python -c "import torch, torch_geometric, pandas, scanpy; print(torch.__version__, torch_geometric.__version__)"
+conda run -n bulkformer-mps python -m pytest tests/test_bulkformer_dx_cli.py
+conda run -n bulkformer-mps python -m bulkformer_dx.cli --help
 ```
 
-Then follow `model/README.md` and `data/README.md` to download the pretrained checkpoints and data assets before opening `bulkformer_extract_feature.ipynb`.
+That approach avoids the common mistake of accidentally running the system `python` instead of the
+project interpreter.
+
+## Daily Usage
+
+Activation is still fine for interactive work:
+
+```bash
+conda activate bulkformer-mps
+python -m bulkformer_dx.cli --help
+pytest tests/test_anomaly_head.py
+```
+
+If your shell still resolves the wrong `python`, use `python3` explicitly or fall back to
+`conda run -n <env> ...`.
+
+## Assets
+
+After the Python environment is ready, follow `model/README.md` and `data/README.md` to download
+the pretrained checkpoints and required data assets before opening
+`bulkformer_extract_feature.ipynb` or loading a pretrained BulkFormer model.

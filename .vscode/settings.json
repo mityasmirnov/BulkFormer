@@ -1,0 +1,4 @@
+{
+  "python.defaultInterpreterPath": "/opt/miniconda3/envs/bulkformer-mps/bin/python",
+  "python.terminal.activateEnvironment": true
+}

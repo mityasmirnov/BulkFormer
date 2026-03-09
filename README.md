@@ -89,7 +89,7 @@ Platform-specific install entry points for new setups:
 
 - `envs/bulkformer_macos_mps.yaml` for macOS Apple Silicon
 - `envs/bulkformer_linux_cuda.yaml` for Linux CUDA 11.8
-- `docs/installation.md` for the exact PyTorch 2.5.1 and PyG wheel commands
+- `docs/installation.md` for the canonical `mamba`/`conda`, bootstrap, and verification flow
 
 ## 🚀 Quick start
 **Step1: clone the repo**
@@ -98,14 +98,15 @@ mkdir ./BulkFormer
 cd BulkFormer
 git clone https://github.com/KangBoming/BulkFormer.git
 ```
-**Step2: create and activate the environment**
+**Step2: create, bootstrap, and verify the environment**
 ```
 cd BulkFormer
-conda env create -f envs/bulkformer_linux_cuda.yaml
-conda activate bulkformer-cuda
+mamba env create -f envs/bulkformer_linux_cuda.yaml
+./scripts/dev/bootstrap_env.sh bulkformer-cuda linux-cuda
+./scripts/dev/verify_env.sh bulkformer-cuda linux-cuda
 ```
 
-On Apple Silicon Macs, use `envs/bulkformer_macos_mps.yaml` instead. The full platform-specific commands, PyTorch 2.5.1 wheel installs, PyG wheel installs, and MPS/CUDA verification steps are documented in `docs/installation.md`. The legacy `bulkformer.yaml` is still kept in the repo for compatibility with older setups.
+On Apple Silicon Macs, use `envs/bulkformer_macos_mps.yaml` plus `./scripts/dev/bootstrap_env.sh bulkformer-mps macos-mps` and `./scripts/dev/verify_env.sh bulkformer-mps macos-mps` instead. The full platform-specific commands, CI-style `conda run` examples, and verification steps are documented in `docs/installation.md`. The legacy `bulkformer.yaml` is still kept in the repo for compatibility with older setups, but it is no longer the recommended path for new installs.
 **Step3: download pretrained model and data**
 ```
 cd BulkFormer/model
@@ -160,13 +161,58 @@ The loader resolves the pretrained checkpoint plus required graph and feature as
 
 Current rollout status:
 
-- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, and Monte Carlo masking anomaly scoring with ranked gene outputs.
+- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, Monte Carlo masking anomaly scoring with ranked gene outputs, and frozen-backbone anomaly head training with sigma/NLL plus optional injected-outlier modes.
 - Install instructions: see `docs/installation.md`.
 - Preprocessing docs: see `docs/bulkformer-dx/preprocess.md`.
 - Anomaly scoring docs: see `docs/bulkformer-dx/anomaly.md`.
-- Still to do: anomaly head training, calibration, tissue workflows, proteomics workflows, and final docs/examples.
+- Still to do: calibration, tissue workflows, proteomics workflows, and final docs/examples.
 
 Supporting docs live in `docs/bulkformer-dx/`.
+
+## Environment Workflow
+
+For reproducible local and CI-like setup, use the repo-owned environment flow:
+
+```bash
+mamba env create -f envs/bulkformer_macos_mps.yaml
+./scripts/dev/bootstrap_env.sh bulkformer-mps macos-mps
+./scripts/dev/verify_env.sh bulkformer-mps macos-mps
+```
+
+Daily usage options:
+
+- Interactive shell: `conda activate bulkformer-mps`
+- Shell-independent: `conda run -n bulkformer-mps python -m bulkformer_dx.cli --help`
+
+If `python` on your shell points at the wrong interpreter, prefer `conda run -n <env> ...` or `python3`.
+
+### Cursor / VS Code Workspace
+
+This repo now includes a workspace interpreter setting in `.vscode/settings.json` that points
+Cursor/VS Code at the local `bulkformer-mps` interpreter:
+
+```json
+{
+  "python.defaultInterpreterPath": "/opt/miniconda3/envs/bulkformer-mps/bin/python",
+  "python.terminal.activateEnvironment": true
+}
+```
+
+That makes the environment available directly inside this project after the env has been created
+and bootstrapped. If your local conda installation lives somewhere else, either:
+
+- update `.vscode/settings.json` to your interpreter path, or
+- use `conda run -n bulkformer-mps ...` in the integrated terminal.
+
+Recommended first-use flow in this project:
+
+```bash
+mamba env create -f envs/bulkformer_macos_mps.yaml
+./scripts/dev/bootstrap_env.sh bulkformer-mps macos-mps
+./scripts/dev/verify_env.sh bulkformer-mps macos-mps
+conda activate bulkformer-mps
+python -m bulkformer_dx.cli --help
+```
 
 ## 🛠️ Developer Workflow (Ralph, Cursor by default)
 
