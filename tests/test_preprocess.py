@@ -13,6 +13,7 @@ import pandas as pd
 from bulkformer_dx.preprocess import (
     align_to_bulkformer_genes,
     counts_to_tpm,
+    load_counts_matrix,
     load_gene_lengths,
     normalize_ensembl_id,
 )
@@ -148,3 +149,26 @@ def test_preprocess_cli_writes_outputs_and_normalizes_gene_ids(tmp_path: Path) -
     assert mask["is_valid"].tolist() == [1, 1, 0]
     assert report["collapsed_input_gene_columns"] == 1
     assert report["bulkformer_valid_gene_count"] == 2
+
+
+def test_load_counts_matrix_autogenerates_sample_ids_for_sample_by_gene_demo_tables(
+    tmp_path: Path,
+) -> None:
+    counts_path = tmp_path / "demo_counts.csv"
+    counts_path.write_text(
+        "ENSG1,ENSG2,ENSG3\n"
+        "10,0,5\n"
+        "3,8,1\n",
+        encoding="utf-8",
+    )
+
+    counts, metadata = load_counts_matrix(
+        counts_path,
+        orientation="samples-by-genes",
+    )
+
+    assert list(counts.index) == ["sample_1", "sample_2"]
+    assert list(counts.columns) == ["ENSG1", "ENSG2", "ENSG3"]
+    assert counts.index.name == "sample_id"
+    assert counts.loc["sample_1", "ENSG1"] == 10.0
+    assert metadata["orientation"] == "samples-by-genes"

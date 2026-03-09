@@ -58,6 +58,10 @@ case "$platform" in
       echo "nvidia-smi not found on PATH; skipping driver printout"
     fi
     "$env_python" -c "import torch; print({'cuda_available': torch.cuda.is_available(), 'cuda_version': torch.version.cuda, 'device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None})"
+    echo "== torch-sparse check =="
+    "$env_python" -c "import torch_sparse; print({'torch_sparse_import': 'ok'})"
+    echo "== SparseTensor construction check =="
+    "$env_python" -c "import torch; from torch_geometric.typing import SparseTensor; row=torch.tensor([0,1], dtype=torch.long); col=torch.tensor([1,0], dtype=torch.long); value=torch.tensor([1.0,1.0], dtype=torch.float32); sparse=SparseTensor(row=row, col=col, value=value); print({'sparse_tensor_constructed': sparse is not None})"
     ;;
   *)
     echo "Unsupported verification platform: $platform" >&2

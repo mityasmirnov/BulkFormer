@@ -10,6 +10,7 @@ import pytest
 import torch
 
 from bulkformer_dx.bulkformer_model import (
+    build_bulkformer_graph,
     extract_gene_embeddings,
     extract_sample_embeddings,
     load_checkpoint_state_dict,
@@ -18,6 +19,7 @@ from bulkformer_dx.bulkformer_model import (
     resolve_bulkformer_assets,
 )
 from model.config import get_model_params, normalize_model_variant
+from utils.BulkFormer_block import BulkFormer_block
 
 
 class DummyBulkFormer(torch.nn.Module):
@@ -91,6 +93,44 @@ def test_load_checkpoint_state_dict_cleans_wrapped_prefixes(tmp_path: Path) -> N
     cleaned = load_checkpoint_state_dict(checkpoint_path)
 
     assert list(cleaned.keys()) == ["head.weight", "head.bias"]
+
+
+def test_build_bulkformer_graph_falls_back_when_sparse_tensor_cannot_construct(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    graph_path = tmp_path / "graph.pt"
+    weights_path = tmp_path / "weights.pt"
+    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+    edge_weight = torch.tensor([0.5, 1.5, 2.5], dtype=torch.float32)
+    torch.save({"edge_index": edge_index}, graph_path)
+    torch.save(edge_weight, weights_path)
+
+    import torch_geometric.typing as pyg_typing
+
+    class BrokenSparseTensor:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise ImportError("torch-sparse unavailable at runtime")
+
+    monkeypatch.setattr(pyg_typing, "SparseTensor", BrokenSparseTensor)
+
+    resolved_graph = build_bulkformer_graph(graph_path, weights_path, device="cpu")
+
+    assert isinstance(resolved_graph, tuple)
+    resolved_edge_index, resolved_edge_weight = resolved_graph
+    assert torch.equal(resolved_edge_index, edge_index)
+    assert torch.equal(resolved_edge_weight, edge_weight)
+
+
+def test_bulkformer_block_accepts_edge_index_and_edge_weight_tuple() -> None:
+    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+    edge_weight = torch.tensor([0.5, 1.5, 2.5], dtype=torch.float32)
+    block = BulkFormer_block(dim=16, gene_length=3, p_repeat=1)
+    expression = torch.randn(2, 3, 16)
+
+    resolved = block(expression, (edge_index, edge_weight))
+
+    assert resolved.shape == expression.shape
 
 
 def test_embedding_utilities_batch_and_aggregate_outputs() -> None:

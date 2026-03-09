@@ -90,6 +90,7 @@ Platform-specific install entry points for new setups:
 - `envs/bulkformer_macos_mps.yaml` for macOS Apple Silicon
 - `envs/bulkformer_linux_cuda.yaml` for Linux CUDA 11.8
 - `docs/installation.md` for the canonical `mamba`/`conda`, bootstrap, and verification flow
+- `docs/INSTALL_linux_server.md` for a Linux server bring-up checklist that explicitly verifies `torch_sparse` and `SparseTensor`
 
 ## 🚀 Quick start
 **Step1: clone the repo**
@@ -107,6 +108,8 @@ mamba env create -f envs/bulkformer_linux_cuda.yaml
 ```
 
 On Apple Silicon Macs, use `envs/bulkformer_macos_mps.yaml` plus `./scripts/dev/bootstrap_env.sh bulkformer-mps macos-mps` and `./scripts/dev/verify_env.sh bulkformer-mps macos-mps` instead. The full platform-specific commands, CI-style `conda run` examples, and verification steps are documented in `docs/installation.md`. The legacy `bulkformer.yaml` is still kept in the repo for compatibility with older setups, but it is no longer the recommended path for new installs.
+
+For Linux GPU servers, use `docs/INSTALL_linux_server.md` as the starting point. That guide includes the exact environment name (`bulkformer-cuda`), bootstrap commands, `torch_sparse` and `SparseTensor` verification, asset placement, the `37M` smoke test, and first demo-run commands.
 **Step3: download pretrained model and data**
 ```
 cd BulkFormer/model
@@ -172,6 +175,7 @@ Key docs:
 - Install overview: `docs/installation.md`
 - Apple Silicon / MPS: `docs/INSTALL_mac_m1.md`
 - Linux CUDA 11.8: `docs/INSTALL_linux_cuda.md`
+- Linux server bring-up: `docs/INSTALL_linux_server.md`
 - Diagnostics architecture: `docs/bulkformer-dx/architecture.md`
 - Diagnostics CLI reference: `docs/bulkformer-dx/cli-reference.md`
 - RNA anomaly pipeline: `docs/PIPELINE_rna_anomaly.md`

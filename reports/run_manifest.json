@@ -1,0 +1,62 @@
+{
+  "run_label": "demo_rna_37m",
+  "status": "reporting_complete",
+  "git": {
+    "branch": "ralph/demo-rna-37m",
+    "commit": "a2809f6a9d26bc55d1fb072d6d73f74b54ef7fa4"
+  },
+  "environment": {
+    "name": "bulkformer-mps",
+    "python": "3.12.7",
+    "python_executable": "/opt/miniconda3/envs/bulkformer-mps/bin/python",
+    "torch": "2.5.1",
+    "torch_geometric": "2.6.1",
+    "device_preference": "mps",
+    "mps_built": true,
+    "mps_available": true,
+    "cuda_available": false,
+    "notes": [
+      "Use `conda run -n bulkformer-mps ...` for reproducible commands in this workspace.",
+      "PyG emits optional-extension warnings for pyg-lib and torch-sparse on this macOS setup.",
+      "bulkformer_dx.bulkformer_model now falls back to edge_index plus edge_weight when SparseTensor construction fails at runtime.",
+      "utils/BulkFormer_block.py now unpacks that tuple fallback before calling GCNConv."
+    ]
+  },
+  "inputs": {
+    "checkpoint": "model/BulkFormer_37M.pt",
+    "gene_info": "data/bulkformer_gene_info.csv",
+    "graph": "data/G_tcga.pt",
+    "graph_weights": "data/G_tcga_weight.pt",
+    "gene_embeddings": "data/esm2_feature_concat.pt",
+    "demo_counts": "data/demo_count_data.csv",
+    "demo_normalized": "data/demo_normalized_data.csv",
+    "demo_anndata": "data/demo_count_adata.h5ad",
+    "gene_lengths": "data/gene_length_df.csv"
+  },
+  "outputs": {
+    "smoke_test_stdout": "reports/smoke_test_stdout.txt",
+    "figures_dir": "reports/figures",
+    "demo_preprocess_dir": "runs/demo_preprocess_37M",
+    "preprocess_qc_summary": "reports/preprocess_qc_summary.json",
+    "preprocess_figures": [
+      "reports/figures/preprocess_tpm_total_hist.png",
+      "reports/figures/preprocess_log1p_hist.png",
+      "reports/figures/preprocess_valid_gene_fraction.png",
+      "reports/figures/preprocess_distribution_compare.png",
+      "reports/figures/preprocess_gene_median_compare.png"
+    ],
+    "demo_anomaly_score_dir": "runs/demo_anomaly_score_37M",
+    "demo_anomaly_calibrated_dir": "runs/demo_anomaly_calibrated_37M",
+    "anomaly_qc_summary": "reports/anomaly_qc_summary.json",
+    "spike_recovery_table": "reports/spike_recovery.tsv",
+    "spike_metadata": "runs/demo_spike_37M/spike_metadata.json",
+    "spike_anomaly_score_dir": "runs/demo_spike_anomaly_score_37M",
+    "spike_anomaly_calibrated_dir": "runs/demo_spike_anomaly_calibrated_37M",
+    "notebook": "notebooks/bulkformer_dx_end2end_demo_37M.ipynb",
+    "report": "reports/bulkformer_dx_demo_report.md"
+  },
+  "verification": {
+    "full_pytest": "43 passed, 1 skipped",
+    "artifact_integrity": "artifact_integrity_ok"
+  }
+}

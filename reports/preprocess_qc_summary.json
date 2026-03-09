@@ -1,0 +1,16 @@
+{
+  "samples": 100,
+  "input_genes": 20010,
+  "bulkformer_valid_gene_fraction": 1.0,
+  "tpm_total_min": 999999.9999999878,
+  "tpm_total_median": 1000000.0000000008,
+  "tpm_total_max": 1000000.0000000071,
+  "non_fill_log1p_min": 0.0,
+  "non_fill_log1p_median": 2.080934328365429,
+  "non_fill_log1p_max": 12.40050435158467,
+  "provided_normalized_rows": 967,
+  "provided_normalized_cols": 20010,
+  "comparison_mode": "distribution_and_gene_median_only",
+  "comparison_note": "No one-to-one sample correlation was computed because demo_count_data.csv has 100 rows while demo_normalized_data.csv has 967 rows.",
+  "gene_median_correlation": 0.9375801715264874
+}

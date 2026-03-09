@@ -30,7 +30,11 @@ class BulkFormer_block(nn.Module):
  
         # === 图卷积 ===
         x = self.layernorm(x)
-        x = x + self.g(x, graph)
+        if isinstance(graph, tuple):
+            edge_index, edge_weight = graph
+            x = x + self.g(x, edge_index, edge_weight)
+        else:
+            x = x + self.g(x, graph)
         # === performer ===
         x = self.f(x)
 

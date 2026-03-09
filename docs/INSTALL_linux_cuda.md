@@ -50,10 +50,22 @@ conda run -n bulkformer-cuda python -c "import torch; print({'cuda_available': t
 ./scripts/dev/verify_env.sh bulkformer-cuda linux-cuda
 ```
 
+`verify_env.sh` is expected to do more than a shallow import check on Linux:
+
+- verify CUDA visibility
+- verify `torch_sparse` imports cleanly
+- verify `torch_geometric.typing.SparseTensor(...)` can actually be constructed
+- run the targeted diagnostics tests
+
+If `torch_sparse` or `SparseTensor` fails here, fix the environment before starting BulkFormer runs.
+
 ## 5. Notes
 
 - Keep the torch family and PyG wheel index aligned; do not mix `cu118` and `cu124` packages in one env.
 - Ensure the host NVIDIA driver supports CUDA 11.8 runtime wheels.
 - If `nvidia-smi` is missing from `PATH`, `verify_env.sh` still checks torch CUDA availability directly.
+
+For a full server-first checklist including asset placement, smoke-test commands, and first demo
+run commands, see `docs/INSTALL_linux_server.md`.
 
 See `docs/installation.md` for the repo-wide environment workflow and shell-independent `conda run` usage.

@@ -1,0 +1,31 @@
+{
+  "target_samples": [
+    "sample_1",
+    "sample_2"
+  ],
+  "target_genes": [
+    "ENSG00000000003",
+    "ENSG00000000005",
+    "ENSG00000000419",
+    "ENSG00000000457",
+    "ENSG00000000460",
+    "ENSG00000000938",
+    "ENSG00000000971",
+    "ENSG00000001036",
+    "ENSG00000001084",
+    "ENSG00000001167",
+    "ENSG00000001460",
+    "ENSG00000001461",
+    "ENSG00000001497",
+    "ENSG00000001561",
+    "ENSG00000001617",
+    "ENSG00000001626",
+    "ENSG00000001629",
+    "ENSG00000001630",
+    "ENSG00000001631",
+    "ENSG00000002016"
+  ],
+  "spike_delta": 3.0,
+  "input_path": "runs/demo_preprocess_37M/aligned_log1p_tpm.tsv",
+  "spiked_path": "runs/demo_spike_37M/aligned_log1p_tpm_spiked.tsv"
+}

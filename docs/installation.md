@@ -83,6 +83,11 @@ Notes:
 - Make sure the host NVIDIA driver supports CUDA 11.8 runtime wheels before bootstrapping.
 - `verify_env.sh` prints `nvidia-smi` when available and still performs the torch CUDA check even
   if `nvidia-smi` is absent from `PATH`.
+- The Linux verification path now also checks that `torch_sparse` imports cleanly and that a real
+  `torch_geometric.typing.SparseTensor` object can be constructed. Treat a failure there as a
+  broken PyG install, not as a warning you can ignore.
+- For a server-first checklist including asset placement, smoke-test commands, and first-run demo
+  commands, use `docs/INSTALL_linux_server.md`.
 
 ## CI-like Usage Without Activation
 

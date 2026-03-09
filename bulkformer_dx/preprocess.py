@@ -123,13 +123,16 @@ def load_counts_matrix(
     else:
         working_table = counts_table.copy()
         resolved_sample_column = sample_column
-        if resolved_sample_column is None and str(working_table.columns[0]).lower() not in {
-            "ensg_id",
-            "gene_id",
-            "ensembl_gene_id",
-            "gene",
-        }:
-            resolved_sample_column = str(working_table.columns[0])
+        normalized_columns = [normalize_ensembl_id(column) for column in working_table.columns]
+        columns_are_all_ensembl = all(column is not None for column in normalized_columns)
+        if resolved_sample_column is None and not columns_are_all_ensembl:
+            if str(working_table.columns[0]).lower() not in {
+                "ensg_id",
+                "gene_id",
+                "ensembl_gene_id",
+                "gene",
+            }:
+                resolved_sample_column = str(working_table.columns[0])
 
         if resolved_sample_column is not None:
             if resolved_sample_column not in working_table.columns:
@@ -138,9 +141,9 @@ def load_counts_matrix(
                 )
             working_table = working_table.set_index(resolved_sample_column)
         sample_by_gene = working_table.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-        sample_by_gene.columns = [
-            normalize_ensembl_id(column) for column in sample_by_gene.columns
-        ]
+        sample_by_gene.columns = [normalize_ensembl_id(column) for column in sample_by_gene.columns]
+        if resolved_sample_column is None and columns_are_all_ensembl:
+            sample_by_gene.index = [f"sample_{index + 1}" for index in range(len(sample_by_gene))]
         sample_by_gene.index.name = "sample_id"
 
     sample_by_gene = sample_by_gene.loc[:, [column is not None for column in sample_by_gene.columns]]

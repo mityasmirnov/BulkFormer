@@ -1,0 +1,101 @@
+/opt/miniconda3/envs/bulkformer-mps/lib/python3.12/site-packages/torch_geometric/typing.py:68: UserWarning: An issue occurred while importing 'pyg-lib'. Disabling its usage. Stacktrace: dlopen(/opt/miniconda3/envs/bulkformer-mps/lib/python3.12/site-packages/libpyg.so, 0x0006): Library not loaded: /Library/Frameworks/Python.framework/Versions/3.12/Python
+  Referenced from: <6E2F52AB-0E67-301E-9080-EE4450C3468F> /opt/miniconda3/envs/bulkformer-mps/lib/python3.12/site-packages/libpyg.so
+  Reason: tried: '/Library/Frameworks/Python.framework/Versions/3.12/Python' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/Library/Frameworks/Python.framework/Versions/3.12/Python' (no such file), '/Library/Frameworks/Python.framework/Versions/3.12/Python' (no such file)
+  warnings.warn(f"An issue occurred while importing 'pyg-lib'. "
+/opt/miniconda3/envs/bulkformer-mps/lib/python3.12/site-packages/torch_geometric/typing.py:124: UserWarning: An issue occurred while importing 'torch-sparse'. Disabling its usage. Stacktrace: dlopen(/opt/miniconda3/envs/bulkformer-mps/lib/python3.12/site-packages/libpyg.so, 0x0006): Library not loaded: /Library/Frameworks/Python.framework/Versions/3.12/Python
+  Referenced from: <6E2F52AB-0E67-301E-9080-EE4450C3468F> /opt/miniconda3/envs/bulkformer-mps/lib/python3.12/site-packages/libpyg.so
+  Reason: tried: '/Library/Frameworks/Python.framework/Versions/3.12/Python' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/Library/Frameworks/Python.framework/Versions/3.12/Python' (no such file), '/Library/Frameworks/Python.framework/Versions/3.12/Python' (no such file)
+  warnings.warn(f"An issue occurred while importing 'torch-sparse'. "
+
+{
+  "checkpoint_path": "model/BulkFormer_37M.pt",
+  "config": {
+    "bin_head": 12,
+    "bins": 0,
+    "dim": 128,
+    "full_head": 8,
+    "gb_repeat": 1,
+    "gene_length": 20010,
+    "p_repeat": 1
+  },
+  "device": "cpu",
+  "gene_embedding_path": "data/esm2_feature_concat.pt",
+  "gene_info_path": "data/bulkformer_gene_info.csv",
+  "graph_path": "data/G_tcga.pt",
+  "graph_weights_path": "data/G_tcga_weight.pt",
+  "input_non_fill_count": 8,
+  "input_preview": [
+    [
+      1.25,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      2.5,
+      -10.0
+    ],
+    [
+      -10.0,
+      0.5,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      -10.0,
+      1.0,
+      -10.0
+    ]
+  ],
+  "input_shape": [
+    2,
+    20010
+  ],
+  "predicted_expression_shape": [
+    2,
+    20010
+  ],
+  "prediction_preview": [
+    [
+      0.0,
+      1.875,
+      1.875,
+      1.875,
+      1.875,
+      1.875,
+      1.875,
+      1.875,
+      1.875,
+      1.875,
+      0.0,
+      1.875
+    ],
+    [
+      2.0,
+      0.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      0.0,
+      2.0
+    ]
+  ],
+  "sample_embedding_shape": [
+    2,
+    131
+  ],
+  "variant": "37M"
+}
+

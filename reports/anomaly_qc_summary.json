@@ -1,0 +1,16 @@
+{
+  "empirical_significant_gene_count_mean": 0.0,
+  "absolute_significant_gene_count_mean": 2107.41,
+  "absolute_significant_gene_count_median": 1950.5,
+  "spike_target_gene_count": 40,
+  "spike_targets_scored_before": 38,
+  "spike_targets_scored_after": 38,
+  "spike_rank_improvement_median": 7684.5,
+  "spike_rank_improvement_mean": 7907.05,
+  "spike_score_gain_median": 2.8838445208893733,
+  "spike_score_gain_mean": 2.2760240999443964,
+  "spike_targets_top100_after": 18,
+  "spike_targets_top100_before": 0,
+  "spike_targets_significant_after": 34,
+  "spike_targets_significant_before": 4
+}
