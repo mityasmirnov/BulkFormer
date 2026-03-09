@@ -274,4 +274,6 @@ Boming Kang <kangbm@bjmu.edu.cn>
 
 Qinghua Cui <cuiqinghua@bjmu.edu.cn>
 
+Dmitrii (Dima) Smirnov <mitya.smirnov@gmail.com>
+
 
