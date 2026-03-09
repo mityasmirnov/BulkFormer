@@ -38,3 +38,13 @@ def test_anomaly_help_lists_scaffolded_subcommands() -> None:
     assert "score" in result.stdout
     assert "head" in result.stdout
     assert "calibrate" in result.stdout
+
+
+def test_tissue_help_lists_train_predict_and_artifact_options() -> None:
+    result = run_cli("tissue", "--help")
+
+    assert result.returncode == 0
+    assert "train" in result.stdout
+    assert "predict" in result.stdout
+    assert "--labels" in result.stdout
+    assert "--artifact-path" in result.stdout

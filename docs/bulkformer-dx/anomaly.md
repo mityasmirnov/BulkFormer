@@ -54,4 +54,34 @@ The underlying BulkFormer backbone stays frozen during head training.
 
 ## Calibration
 
-The cohort calibration subcommand is still a placeholder and will be implemented in a later rollout step.
+The `anomaly calibrate` workflow calibrates ranked gene residuals against the cohort-wide
+distribution for each gene, then applies Benjamini-Yekutieli correction within each sample by
+default. This keeps the primary path empirical and non-parametric while still giving each sample a
+multiple-testing-aware ranking.
+
+Inputs:
+
+- `--scores`: path to the anomaly scoring output directory or its `ranked_genes/` subdirectory.
+- `--output-dir`: directory for calibrated ranked tables and cohort summaries.
+- `--count-space-method`: optional count-space support path. `none` keeps the workflow purely
+  empirical. `nb_approx` adds a TPM-derived negative-binomial approximation and is explicitly
+  labeled as approximate rather than raw-count inference.
+
+Outputs:
+
+- `ranked_genes/<sample>.tsv`: calibrated ranked tables with `empirical_p_value` and `by_q_value`.
+- `calibration_summary.tsv`: per-sample summary including minimum empirical/BY values and the count
+  of BY-significant genes.
+- `calibration_run.json`: run metadata plus an approximation note when `nb_approx` is enabled.
+
+Example:
+
+```bash
+python -m bulkformer_dx.cli anomaly calibrate \
+  --scores output/anomaly \
+  --output-dir output/anomaly_calibrated \
+  --count-space-method nb_approx
+```
+
+The `nb_approx` path is intended only as a count-space ranking aid after `log1p(TPM)` conversion.
+It does not reproduce OUTRIDER and should be interpreted as an approximation.

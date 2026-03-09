@@ -8,7 +8,7 @@
 
 - [BulkFormer Diagnostics Toolkit](bulkformer-dx/README.md): overview of the `bulkformer_dx` package and current rollout status.
 - [Preprocess Workflow](bulkformer-dx/preprocess.md): counts loading, TPM normalization, `log1p(TPM)`, and BulkFormer alignment usage.
-- [Anomaly Workflow](bulkformer-dx/anomaly.md): placeholder for anomaly scoring, head training, and calibration docs.
+- [Anomaly Workflow](bulkformer-dx/anomaly.md): anomaly scoring, frozen-backbone head training, and cohort calibration docs.
 - [Tissue Workflow](bulkformer-dx/tissue.md): placeholder for tissue validation training and prediction docs.
 - [Proteomics Workflow](bulkformer-dx/proteomics.md): placeholder for proteomics training and inference docs.
 

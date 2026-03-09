@@ -162,10 +162,11 @@ The loader resolves the pretrained checkpoint plus required graph and feature as
 Current rollout status:
 
 - Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, Monte Carlo masking anomaly scoring with ranked gene outputs, and frozen-backbone anomaly head training with sigma/NLL plus optional injected-outlier modes.
+- Completed: CLI/package scaffold, initial docs wiring, Ralph workflow wiring, platform-specific installation docs, preprocessing with BulkFormer-aligned `log1p(TPM)` export, reusable BulkFormer asset/model loading plus embedding extraction utilities, Monte Carlo masking anomaly scoring with ranked gene outputs, frozen-backbone anomaly head training with sigma/NLL plus optional injected-outlier modes, and cohort calibration with empirical p-values plus BY correction and an optional NB approximation.
 - Install instructions: see `docs/installation.md`.
 - Preprocessing docs: see `docs/bulkformer-dx/preprocess.md`.
 - Anomaly scoring docs: see `docs/bulkformer-dx/anomaly.md`.
-- Still to do: calibration, tissue workflows, proteomics workflows, and final docs/examples.
+- Still to do: tissue workflows, proteomics workflows, and final docs/examples.
 
 Supporting docs live in `docs/bulkformer-dx/`.
 

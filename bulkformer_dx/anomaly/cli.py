@@ -221,10 +221,27 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
 
     calibrate_parser = anomaly_subparsers.add_parser(
         "calibrate",
-        help="Planned cohort calibration workflow.",
+        help="Calibrate ranked anomaly scores across the cohort.",
     )
-    calibrate_parser.add_argument("--scores", help="Path to anomaly scores.")
-    calibrate_parser.add_argument("--output-dir", help="Directory for calibration outputs.")
+    calibrate_parser.add_argument(
+        "--scores",
+        required=True,
+        help="Path to an anomaly score output directory or ranked_genes directory.",
+    )
+    calibrate_parser.add_argument(
+        "--output-dir",
+        required=True,
+        help="Directory for calibrated ranked tables and cohort summaries.",
+    )
+    calibrate_parser.add_argument(
+        "--count-space-method",
+        choices=calibration.SUPPORTED_COUNT_SPACE_METHODS,
+        default=calibration.DEFAULT_COUNT_SPACE_METHOD,
+        help=(
+            "Optional count-space support path. 'nb_approx' adds a TPM-derived negative-binomial "
+            "approximation and is clearly labeled as approximate."
+        ),
+    )
     calibrate_parser.set_defaults(func=calibration.run)
 
     parser.set_defaults(func=run)
