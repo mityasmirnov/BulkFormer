@@ -292,12 +292,22 @@ def _expression_to_tpm(values: np.ndarray) -> np.ndarray:
     return np.clip(tpm, a_min=0.0, a_max=None)
 
 
-def _empirical_upper_tail_p_value(distribution: np.ndarray, observed_value: float) -> float:
+def _leave_one_out_empirical_p_value(
+    *,
+    distribution: np.ndarray,
+    observed_value: float,
+) -> float:
+    """Estimate an upper-tail empirical p-value against the cohort background.
+
+    The current sample should not be part of its own reference distribution; this helper
+    applies a +1 pseudo-count so finite p-values remain available even for small cohorts.
+    """
     finite_distribution = np.asarray(distribution, dtype=float)
     finite_distribution = finite_distribution[np.isfinite(finite_distribution)]
     if finite_distribution.size == 0:
         raise ValueError("Empirical calibration requires at least one finite cohort score.")
-    return float(np.count_nonzero(finite_distribution >= observed_value) / finite_distribution.size)
+    exceedances = float(np.count_nonzero(finite_distribution >= observed_value))
+    return (exceedances + 1.0) / (finite_distribution.size + 1.0)
 
 
 def _estimate_negative_binomial_parameters(
@@ -367,7 +377,10 @@ def calibrate_ranked_gene_scores(
     }
     if len(validated_scores) < 2:
         raise ValueError("Empirical cohort calibration requires at least two samples.")
-    anomaly_scores_by_gene = _collect_gene_arrays(validated_scores, "anomaly_score")
+    anomaly_score_lookup = {
+        sample_id: dict(zip(table["ensg_id"].astype(str), table["anomaly_score"], strict=True))
+        for sample_id, table in validated_scores.items()
+    }
     empirical_sigma_by_gene = _estimate_empirical_sigma_by_gene(validated_scores)
     nb_parameters = (
         _estimate_negative_binomial_parameters(validated_scores)
@@ -382,7 +395,17 @@ def calibrate_ranked_gene_scores(
         calibrated = table.copy()
         empirical_p_values = np.array(
             [
-                _empirical_upper_tail_p_value(anomaly_scores_by_gene[gene_id], anomaly_score)
+                _leave_one_out_empirical_p_value(
+                    distribution=np.array(
+                        [
+                            score_by_gene[str(gene_id)]
+                            for other_sample_id, score_by_gene in anomaly_score_lookup.items()
+                            if other_sample_id != sample_id and str(gene_id) in score_by_gene
+                        ],
+                        dtype=float,
+                    ),
+                    observed_value=float(anomaly_score),
+                )
                 for gene_id, anomaly_score in zip(
                     calibrated["ensg_id"],
                     calibrated["anomaly_score"],
