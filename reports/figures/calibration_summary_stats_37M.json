@@ -1,0 +1,8 @@
+{
+  "variant": "37M",
+  "alpha": 0.05,
+  "samples": 146,
+  "mean_absolute_outliers_per_sample": 10393.931506849314,
+  "median_absolute_outliers_per_sample": 10489.0,
+  "mean_empirical_005_per_sample": 0.0
+}

@@ -1,0 +1,33 @@
+{
+  "run_id": "clinical_rnaseq_37M",
+  "git_sha": "a2809f6a9d26bc55d1fb072d6d73f74b54ef7fa4",
+  "env": "bulkformer-mps",
+  "device": "cpu",
+  "assets": {
+    "bulkformer_gene_info": "data/bulkformer_gene_info.csv",
+    "G_tcga": "data/G_tcga.pt",
+    "G_tcga_weight": "data/G_tcga_weight.pt",
+    "esm2_feature_concat": "data/esm2_feature_concat.pt",
+    "checkpoint": "model/BulkFormer_37M.pt"
+  },
+  "inputs": {
+    "raw_counts": "data/clinical_rnaseq/raw_counts.tsv",
+    "gene_annotation": "data/clinical_rnaseq/gene_annotation_v29.tsv",
+    "sample_annotation": "data/clinical_rnaseq/sample_annotation.tsv"
+  },
+  "outputs": {
+    "preprocess": "runs/clinical_preprocess_37M",
+    "anomaly_score": "runs/clinical_anomaly_score_37M",
+    "anomaly_calibrated": "runs/clinical_anomaly_calibrated_37M",
+    "embeddings": "runs/clinical_embeddings_37M",
+    "annotated": "runs/clinical_annotated",
+    "report": "reports/bulkformer_dx_clinical_report.md",
+    "notebook": "notebooks/bulkformer_dx_clinical_rnaseq_37M.ipynb",
+    "147M_anomaly_score": "runs/clinical_anomaly_score_147M",
+    "147M_anomaly_calibrated": "runs/clinical_anomaly_calibrated_147M",
+    "147M_embeddings": "runs/clinical_embeddings_147M",
+    "147M_annotated": "runs/clinical_annotated_147M",
+    "147M_report": "reports/bulkformer_dx_clinical_report_147M.md",
+    "147M_notebook": "notebooks/bulkformer_dx_clinical_rnaseq_147M.ipynb"
+  }
+}
