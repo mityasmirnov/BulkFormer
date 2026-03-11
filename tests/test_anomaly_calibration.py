@@ -61,7 +61,7 @@ def test_calibrate_ranked_gene_scores_adds_empirical_pvalues() -> None:
     assert "by_adj_p_value" in sample_a.columns
     assert "is_significant" in sample_a.columns
     assert np.isclose(sample_a.loc[0, "empirical_p_value"], 0.2)
-    assert np.isclose(sample_a.loc[0, "by_q_value"], 0.6)
+    assert np.isclose(sample_a.loc[0, "by_q_value"], 0.4)
     assert np.isclose(sample_a.loc[1, "empirical_p_value"], 1.0)
     assert sample_a.loc[0, "empirical_p_value"] < sample_a.loc[1, "empirical_p_value"]
     assert set(result.absolute_outliers.columns) >= {
@@ -76,6 +76,28 @@ def test_calibrate_ranked_gene_scores_adds_empirical_pvalues() -> None:
         "is_significant",
     }
 
+
+
+
+def test_calibrate_ranked_gene_scores_uses_leave_one_out_empirical_reference() -> None:
+    ranked_gene_scores = {
+        "sample_a": _make_ranked_table(10.0, 5.0, 1.0),
+        "sample_b": _make_ranked_table(4.0, 2.0, 1.8),
+        "sample_c": _make_ranked_table(3.0, 2.0, 1.9),
+        "sample_d": _make_ranked_table(2.0, 2.0, 1.7),
+        "sample_e": _make_ranked_table(1.0, 2.0, 1.6),
+    }
+
+    result = calibration.calibrate_ranked_gene_scores(ranked_gene_scores)
+
+    assert np.isclose(
+        result.calibrated_ranked_gene_scores["sample_a"].loc[0, "empirical_p_value"],
+        0.2,
+    )
+    assert np.isclose(
+        result.calibrated_ranked_gene_scores["sample_b"].loc[0, "empirical_p_value"],
+        0.4,
+    )
 
 def test_calibrate_ranked_gene_scores_can_add_nb_approximation() -> None:
     ranked_gene_scores = {
