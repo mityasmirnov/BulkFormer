@@ -41,6 +41,10 @@ class PreprocessResult:
     tpm: pd.DataFrame
     log1p_tpm: pd.DataFrame
     aligned_log1p_tpm: pd.DataFrame
+    aligned_counts: pd.DataFrame
+    aligned_tpm: pd.DataFrame
+    gene_lengths_aligned: pd.DataFrame
+    sample_scaling: pd.DataFrame
     valid_gene_mask: pd.DataFrame
     report: dict[str, Any]
 
@@ -284,6 +288,92 @@ def align_to_bulkformer_genes(
     return aligned, mask
 
 
+def align_counts_to_bulkformer(
+    counts: pd.DataFrame,
+    gene_panel: list[str],
+) -> pd.DataFrame:
+    """Align counts to the BulkFormer gene panel. Missing genes get 0 (not -10)."""
+    return counts.reindex(columns=gene_panel, fill_value=0.0)
+
+
+def compute_sample_scaling(
+    counts: pd.DataFrame,
+    gene_lengths_kb: dict[str, float],
+    *,
+    valid_genes: set[str] | None = None,
+    missing_gene_length_kb: float = DEFAULT_MISSING_GENE_LENGTH_BP / 1000.0,
+) -> pd.DataFrame:
+    """Compute S_j = sum_h K_{jh}/L^{kb}_h per sample for TPM↔counts mapping."""
+    if valid_genes is None:
+        valid_genes = set(counts.columns)
+    lengths = np.array(
+        [
+            gene_lengths_kb.get(g, missing_gene_length_kb)
+            for g in counts.columns
+        ],
+        dtype=float,
+    )
+    lengths[lengths <= 0] = missing_gene_length_kb
+    rate = counts.to_numpy(dtype=float) / lengths
+    s_j = rate.sum(axis=1)
+    return pd.DataFrame(
+        {"sample_id": counts.index, "S_j": s_j},
+    ).set_index("sample_id")
+
+
+def build_gene_lengths_aligned(
+    gene_panel: list[str],
+    annotation_lengths: dict[str, float],
+    bulkformer_gene_info_path: Path = DEFAULT_BULKFORMER_GENE_INFO,
+    *,
+    missing_gene_length_bp: float = DEFAULT_MISSING_GENE_LENGTH_BP,
+) -> pd.DataFrame:
+    """Build gene_lengths_aligned table for the BulkFormer panel."""
+    gene_info = _read_table(bulkformer_gene_info_path)
+    bulkformer_lengths = {}
+    if "gene_length" in gene_info.columns and "ensg_id" in gene_info.columns:
+        for _, row in gene_info.iterrows():
+            gid = normalize_ensembl_id(row["ensg_id"])
+            if gid and pd.notna(row.get("gene_length")):
+                bulkformer_lengths[gid] = float(row["gene_length"])
+
+    rows = []
+    for gid in gene_panel:
+        length_bp = annotation_lengths.get(gid) or bulkformer_lengths.get(gid)
+        if length_bp is not None and length_bp > 0:
+            length_kb = length_bp / 1000.0
+            has_length = 1
+        else:
+            length_kb = missing_gene_length_bp / 1000.0
+            has_length = 0
+        rows.append({"ensg_id": gid, "length_kb": length_kb, "has_length": has_length})
+    return pd.DataFrame(rows)
+
+
+def _apply_low_expression_filter(
+    counts: pd.DataFrame,
+    tpm: pd.DataFrame,
+    *,
+    min_count: float | None = None,
+    min_tpm: float | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, int]:
+    """Filter out low-expression genes. Returns filtered counts, tpm, and genes_removed."""
+    if min_count is None and min_tpm is None:
+        return counts, tpm, 0
+    mask = np.ones(counts.shape[1], dtype=bool)
+    if min_count is not None:
+        total_counts = counts.sum(axis=0)
+        mask &= (total_counts >= min_count).to_numpy()
+    if min_tpm is not None:
+        median_tpm = tpm.median(axis=0)
+        mask &= (median_tpm >= min_tpm).to_numpy()
+    genes_removed = int((~mask).sum())
+    if genes_removed > 0:
+        counts = counts.loc[:, mask]
+        tpm = tpm.loc[:, mask]
+    return counts, tpm, genes_removed
+
+
 def preprocess_counts(
     *,
     counts_path: Path,
@@ -296,6 +386,8 @@ def preprocess_counts(
     annotation_length_column: str | None = None,
     fill_value: float = DEFAULT_FILL_VALUE,
     missing_gene_length_bp: float = DEFAULT_MISSING_GENE_LENGTH_BP,
+    min_count: float | None = None,
+    min_tpm: float | None = None,
 ) -> PreprocessResult:
     """Run counts loading, TPM normalization, and BulkFormer alignment."""
     counts, counts_metadata = load_counts_matrix(
@@ -314,12 +406,32 @@ def preprocess_counts(
         gene_lengths,
         missing_gene_length_bp=missing_gene_length_bp,
     )
+    counts, tpm, genes_filtered = _apply_low_expression_filter(
+        counts, tpm, min_count=min_count, min_tpm=min_tpm
+    )
+    gene_lengths_kb = {
+        g: gene_lengths.get(g, missing_gene_length_bp) / 1000.0
+        for g in counts.columns
+    }
+    sample_scaling = compute_sample_scaling(
+        counts,
+        gene_lengths_kb,
+        missing_gene_length_kb=missing_gene_length_bp / 1000.0,
+    )
     log1p_tpm = np.log1p(tpm)
     gene_panel = load_bulkformer_gene_panel(bulkformer_gene_info_path)
+    aligned_counts = align_counts_to_bulkformer(counts, gene_panel)
+    aligned_tpm = tpm.reindex(columns=gene_panel, fill_value=0.0)
     aligned_log1p_tpm, valid_gene_mask = align_to_bulkformer_genes(
         log1p_tpm,
         gene_panel,
         fill_value=fill_value,
+    )
+    gene_lengths_aligned = build_gene_lengths_aligned(
+        gene_panel,
+        gene_lengths,
+        bulkformer_gene_info_path,
+        missing_gene_length_bp=missing_gene_length_bp,
     )
 
     valid_gene_count = int(valid_gene_mask["is_valid"].sum())
@@ -329,6 +441,8 @@ def preprocess_counts(
         "bulkformer_gene_info_path": str(bulkformer_gene_info_path),
         "samples": counts_metadata["samples"],
         "input_genes": counts_metadata["genes"],
+        "genes_after_low_expression_filter": int(counts.shape[1]),
+        "genes_filtered_low_expression": genes_filtered,
         "collapsed_input_gene_columns": counts_metadata["collapsed_gene_columns"],
         "counts_orientation": counts_metadata["orientation"],
         "annotation_rows": annotation_metadata["annotation_rows"],
@@ -350,6 +464,10 @@ def preprocess_counts(
         tpm=tpm,
         log1p_tpm=log1p_tpm,
         aligned_log1p_tpm=aligned_log1p_tpm,
+        aligned_counts=aligned_counts,
+        aligned_tpm=aligned_tpm,
+        gene_lengths_aligned=gene_lengths_aligned,
+        sample_scaling=sample_scaling,
         valid_gene_mask=valid_gene_mask,
         report=report,
     )
@@ -362,6 +480,12 @@ def write_preprocess_outputs(result: PreprocessResult, output_dir: Path) -> None
     result.tpm.to_csv(output_dir / "tpm.tsv", sep="\t")
     result.log1p_tpm.to_csv(output_dir / "log1p_tpm.tsv", sep="\t")
     result.aligned_log1p_tpm.to_csv(output_dir / "aligned_log1p_tpm.tsv", sep="\t")
+    result.aligned_counts.to_csv(output_dir / "aligned_counts.tsv", sep="\t")
+    result.aligned_tpm.to_csv(output_dir / "aligned_tpm.tsv", sep="\t")
+    result.gene_lengths_aligned.to_csv(
+        output_dir / "gene_lengths_aligned.tsv", sep="\t", index=False
+    )
+    result.sample_scaling.to_csv(output_dir / "sample_scaling.tsv", sep="\t")
     result.valid_gene_mask.to_csv(output_dir / "valid_gene_mask.tsv", sep="\t", index=False)
 
     with (output_dir / "preprocess_report.json").open("w", encoding="utf-8") as handle:
@@ -426,6 +550,20 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         default=DEFAULT_MISSING_GENE_LENGTH_BP,
         help="Fallback gene length in base pairs for genes absent from the annotation.",
     )
+    parser.add_argument(
+        "--min-count",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Filter out genes with total count across samples < N (optional low-expression filter).",
+    )
+    parser.add_argument(
+        "--min-tpm",
+        type=float,
+        default=None,
+        metavar="T",
+        help="Filter out genes with median TPM across samples < T (optional low-expression filter).",
+    )
     parser.set_defaults(func=run)
 
 
@@ -442,6 +580,8 @@ def run(args: argparse.Namespace) -> int:
         annotation_length_column=args.annotation_length_column,
         fill_value=args.fill_value,
         missing_gene_length_bp=args.missing_gene_length_bp,
+        min_count=getattr(args, "min_count", None),
+        min_tpm=getattr(args, "min_tpm", None),
     )
     output_dir = Path(args.output_dir)
     write_preprocess_outputs(result, output_dir)

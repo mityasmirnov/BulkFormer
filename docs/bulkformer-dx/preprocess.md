@@ -25,8 +25,14 @@ The default input orientation is `genes-by-samples`, where the first column cont
 - `tpm.tsv`: sample-by-gene TPM matrix.
 - `log1p_tpm.tsv`: sample-by-gene `log1p(TPM)` matrix before BulkFormer alignment.
 - `aligned_log1p_tpm.tsv`: BulkFormer-ordered `log1p(TPM)` matrix with `-10` fill for missing genes.
-- `valid_gene_mask.tsv`: per-gene validity mask in BulkFormer order.
+- `aligned_counts.tsv`: BulkFormer-ordered counts; missing genes = 0 (flagged invalid via mask). Required for NB tests.
+- `aligned_tpm.tsv`: TPM aligned to BulkFormer panel.
+- `gene_lengths_aligned.tsv`: BulkFormer panel with `length_kb` and `has_length`. Required for NB tests.
+- `sample_scaling.tsv`: S_j = Σ K_{jh}/L^{kb}_h per sample. Required for TPM↔counts mapping in NB tests.
+- `valid_gene_mask.tsv`: per-gene validity mask in BulkFormer order. NB testing applies only to `is_valid==1` genes.
 - `preprocess_report.json`: sample counts, matched gene counts, fallback gene-length usage, and alignment coverage.
+
+Optional low-expression filtering: `--min-count N` and `--min-tpm T` filter genes before alignment.
 
 ## Example
 
