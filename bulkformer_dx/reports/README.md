@@ -6,13 +6,15 @@ Reports document preprocessing, benchmarking, and anomaly detection steps.
 
 | Report | Step | Description |
 |--------|------|-------------|
-| (design doc) | 0 | High-level design summary, schema contracts |
+| `step0_schema.md` | 0 | Core schemas, artifact tree, IO helpers |
+| `docs/plans/2026-03-12-bulkformer-dx-anomaly-design.md` | 0 | High-level design summary |
 | `step2_model_api.md` | 2 | BulkFormer inference API: predict_mean, embeddings, MC samples |
 | `step_two_preprocess_counts.md` | 2 | Preprocess QC: aligned counts, TPM, gene lengths, sample scaling, sanity table |
 | `step_three_nb_outrider_test.md` | 3 | OUTRIDER-style NB test: expected-count mapping, dispersion, p-value formula, calibration wiring |
-| (step four) | 4 | Pseudo-likelihood vs TabPFN, NLL vs residual, sigma source comparisons |
+| `step_four_tabpfn_like_likelihood.md` | 4 | Pseudo-likelihood vs TabPFN, NLL vs residual, sigma source comparisons |
 | `step_five_local_cohort.md` | 5 | Global vs kNN local cohort: embedding viz, significant-gene distributions |
-| (step one/six) | 1,6 | Benchmark scaffold, leaderboards, calibration tables, figures |
+| `step_one_benchmark_scaffold.md` | 1,6 | Benchmark scaffold, method configs, smoke test |
+| `final_benchmark_report.md` | 6 | Leaderboard template, calibration table, reproduction |
 
 ## Generating Reports
 

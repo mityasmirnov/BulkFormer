@@ -62,6 +62,23 @@ def test_gene_outlier_row() -> None:
     assert row.score_gene == 0.5
 
 
+def test_method_config_from_dict() -> None:
+    """MethodConfig materialization from dict with validation."""
+    from bulkformer_dx.io.read_write import method_config_from_dict
+    cfg = method_config_from_dict({"method_id": "nb_v1", "space": "counts"})
+    assert cfg.method_id == "nb_v1"
+    assert cfg.space == "counts"
+    assert cfg.cohort_mode == "global"
+
+
+def test_method_config_requires_method_id() -> None:
+    """method_config_from_dict raises when method_id missing."""
+    from bulkformer_dx.io.read_write import method_config_from_dict
+    import pytest
+    with pytest.raises(ValueError, match="method_id"):
+        method_config_from_dict({"space": "log1p_tpm"})
+
+
 def test_sample_outlier_row() -> None:
     row = SampleOutlierRow(
         sample_id="s1",

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from bulkformer_dx.benchmark.datasets import generate_synthetic_cohort
-from bulkformer_dx.benchmark.inject import inject_outliers_log1p, InjectionResult
+from bulkformer_dx.benchmark.inject import inject_outliers_log1p, InjectionResult, inject_outliers_counts
 from bulkformer_dx.benchmark.metrics import (
     benchmark_metrics,
     compute_auroc,
@@ -17,7 +17,8 @@ from bulkformer_dx.benchmark.metrics import (
     compute_recall_at_fdr,
     compute_ks_uniform,
 )
-from bulkformer_dx.benchmark.runner import run_benchmark_smoke, grid_run, _load_config
+from bulkformer_dx.benchmark.runner import run_benchmark_smoke, grid_run
+from bulkformer_dx.io.read_write import load_config_dict
 
 
 def test_generate_synthetic_cohort_shape() -> None:
@@ -67,6 +68,7 @@ def test_benchmark_metrics_keys() -> None:
     m = benchmark_metrics(gt, score, p_adj=p_adj, p_raw=p_raw)
     assert "auroc" in m
     assert "auprc" in m
+    assert "precision_at_k" in m
     assert "recall_at_fdr_05" in m
     assert "ks_uniform" in m
 
@@ -96,10 +98,31 @@ def test_grid_run(tmp_path: Path) -> None:
     assert len(summary["metrics_per_method"]) == 2
 
 
+def test_run_residual_benchmark(tmp_path: Path) -> None:
+    """Residual benchmark runs without full model (cohort-mean predictor)."""
+    from bulkformer_dx.benchmark.runner import run_residual_benchmark
+    result = run_residual_benchmark(
+        tmp_path, n_samples=15, n_genes=50, n_inject=5, seed=0
+    )
+    assert "metrics" in result
+    assert "auroc" in result["metrics"]
+    assert (tmp_path / "benchmark_summary.json").exists()
+
+
+def test_inject_outliers_counts() -> None:
+    """Count injection produces valid perturbed counts and ground truth."""
+    from bulkformer_dx.benchmark.inject import inject_outliers_counts
+    counts = np.random.poisson(10, size=(10, 20)).astype(float)
+    valid = np.ones((10, 20), dtype=bool)
+    result = inject_outliers_counts(counts, valid, n_inject=5, seed=0)
+    assert result.ground_truth_mask.sum() == 5
+    assert np.all(result.counts_perturbed >= 0)
+
+
 def test_load_config_json(tmp_path: Path) -> None:
     cfg = tmp_path / "cfg.json"
     cfg.write_text('{"dataset": {"n_samples": 5}, "methods": []}')
-    data = _load_config(cfg)
+    data = load_config_dict(cfg)
     assert data["dataset"]["n_samples"] == 5
     assert data["methods"] == []
 

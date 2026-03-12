@@ -51,6 +51,33 @@ def compute_recall_at_fdr(
     return float(tp / n_pos)
 
 
+def compute_precision_at_k(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    k: int = 100,
+) -> float:
+    """Precision at top-k: fraction of true positives among top-k by score.
+
+    Ranks by y_score descending (higher = more anomalous). Ties broken by order.
+
+    Args:
+        y_true: Binary ground truth.
+        y_score: Anomaly score (higher = more anomalous).
+        k: Number of top predictions to consider.
+
+    Returns:
+        Precision = TP / min(k, n_predicted).
+    """
+    y_true = np.asarray(y_true, dtype=bool).ravel()
+    y_score = np.asarray(y_score, dtype=float).ravel()
+    if y_true.size == 0 or k <= 0:
+        return 0.0
+    order = np.argsort(-y_score)
+    top_k = order[: min(k, len(order))]
+    tp = y_true[top_k].sum()
+    return float(tp / len(top_k))
+
+
 def compute_ks_uniform(p_values: np.ndarray) -> float:
     """Kolmogorov-Smirnov statistic against Uniform(0,1)."""
     from scipy.stats import kstest
@@ -67,6 +94,7 @@ def benchmark_metrics(
     score: np.ndarray,
     p_adj: np.ndarray | None = None,
     p_raw: np.ndarray | None = None,
+    k: int = 100,
 ) -> dict[str, float]:
     """Compute standard benchmark metrics."""
     gt = ground_truth.ravel()
@@ -74,6 +102,7 @@ def benchmark_metrics(
     result: dict[str, Any] = {
         "auroc": compute_auroc(gt, sc),
         "auprc": compute_auprc(gt, sc),
+        "precision_at_k": compute_precision_at_k(gt, sc, k=k),
     }
     if p_adj is not None:
         result["recall_at_fdr_05"] = compute_recall_at_fdr(gt, p_adj.ravel(), fdr=0.05)
