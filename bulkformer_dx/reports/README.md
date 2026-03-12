@@ -6,8 +6,13 @@ Reports document preprocessing, benchmarking, and anomaly detection steps.
 
 | Report | Step | Description |
 |--------|------|-------------|
+| (design doc) | 0 | High-level design summary, schema contracts |
+| `step2_model_api.md` | 2 | BulkFormer inference API: predict_mean, embeddings, MC samples |
 | `step_two_preprocess_counts.md` | 2 | Preprocess QC: aligned counts, TPM, gene lengths, sample scaling, sanity table |
 | `step_three_nb_outrider_test.md` | 3 | OUTRIDER-style NB test: expected-count mapping, dispersion, p-value formula, calibration wiring |
+| (step four) | 4 | Pseudo-likelihood vs TabPFN, NLL vs residual, sigma source comparisons |
+| `step_five_local_cohort.md` | 5 | Global vs kNN local cohort: embedding viz, significant-gene distributions |
+| (step one/six) | 1,6 | Benchmark scaffold, leaderboards, calibration tables, figures |
 
 ## Generating Reports
 
@@ -23,3 +28,9 @@ PYTHONPATH=. python scripts/generate_step_two_report.py
 - `gene_lengths_aligned.tsv` – length_kb, has_length per gene
 - `sample_scaling.tsv` – S_j per sample (for TPM↔counts mapping)
 - `valid_gene_mask.tsv` – is_valid (NB tests use is_valid==1 only)
+
+## Benchmark Artifacts
+
+- `benchmark_results.parquet` (or `.tsv`) – per-(sample,gene,method) scores and p-values
+- `benchmark_summary.json` – metrics per method, dataset spec
+- `benchmark_figures/` – QC plots, PR curves, p-value histograms

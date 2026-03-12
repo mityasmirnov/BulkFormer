@@ -146,6 +146,32 @@
       "priority": 11,
       "passes": false,
       "notes": "Commit boundary 10."
+    },
+    {
+      "id": "anomaly-benchmark-harness",
+      "title": "Benchmark harness for anomaly methods",
+      "description": "As a researcher, I want a unified benchmark harness to compare anomaly scoring methods with standardized metrics and outputs.",
+      "acceptanceCriteria": [
+        "benchmark run and benchmark grid-run CLI commands",
+        "Synthetic dataset and outlier injection for evaluation",
+        "AUROC, AUPRC, recall@FDR, KS calibration metrics",
+        "benchmark_results.parquet and benchmark_summary.json outputs"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Anomaly plan step 7."
+    },
+    {
+      "id": "anomaly-docs-reports",
+      "title": "Anomaly docs and reports README",
+      "description": "As a user, I want documentation for scoring methods, cohort modes, and report naming.",
+      "acceptanceCriteria": [
+        "Update docs/bulkformer-dx/anomaly.md with residual, NLL, NB OUTRIDER, cohort-mode",
+        "bulkformer_dx/reports/README.md documents all steps and expected artifacts"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Anomaly plan step 8."
     }
   ]
 }

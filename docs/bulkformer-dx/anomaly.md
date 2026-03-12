@@ -2,6 +2,15 @@
 
 The `anomaly score` workflow performs Monte Carlo masking over BulkFormer-valid genes only, runs BulkFormer expression prediction on each masked pass, and aggregates residuals into ranked per-sample anomaly tables plus cohort-level QC summaries.
 
+## Scoring Methods
+
+Use `--score-type` to select the scoring engine:
+
+- **`residual`** (default): MC residual baseline. For each masked pass, compute `|observed - predicted|` and aggregate per-gene scores across passes.
+- **`nll`**: TabPFN-style pseudo-likelihood. MC-masked log-likelihood under a chosen distribution (Gaussian, Student-t, or optional NB when counts exist). Produces per-gene NLL scores.
+
+Distribution and uncertainty choices are controlled via `MethodConfig` or method ID when using the benchmark harness.
+
 ## Inputs
 
 - `--input`: BulkFormer-aligned sample-by-gene expression table, typically `aligned_log1p_tpm.tsv` from preprocessing.
@@ -92,7 +101,8 @@ Inputs:
 - `--output-dir`: directory for calibrated ranked tables and cohort summaries.
 - `--count-space-method`: optional count-space support path. `none` keeps the workflow purely
   empirical. `nb_approx` adds a TPM-derived negative-binomial approximation and is explicitly
-  labeled as approximate rather than raw-count inference.
+  labeled as approximate. `nb_outrider` uses the OUTRIDER-style discrete-safe two-sided NB test
+  in count space with BulkFormer as the mean model.
 - `--alpha`: significance threshold applied to the BY-adjusted normalized absolute-outlier calls.
 - `--no-gene-wise-centering`: disable gene-wise residual centering (default: enabled).
 - `--student-t`: use Student-t distribution for p-values instead of Gaussian.
@@ -123,3 +133,25 @@ python -m bulkformer_dx.cli anomaly calibrate \
 
 The `nb_approx` path is intended only as a count-space ranking aid after `log1p(TPM)` conversion.
 It does not reproduce OUTRIDER and should be interpreted as an approximation.
+
+Use `nb_outrider` when you have aligned counts and gene lengths; it implements the OUTRIDER-style
+NB test with discrete-safe p-values and dispersion fitting.
+
+## Cohort Mode
+
+Use `--cohort-mode` and `--knn-k` for calibration:
+
+- **`global`** (default): Use all samples as the cohort for sigma and residual estimation.
+- **`knn_local`**: Use kNN in embedding space to select neighbors per sample; derive local sigma
+  and dispersion per sample. Requires `--input` for embeddings.
+
+Example:
+
+```bash
+python -m bulkformer_dx.cli anomaly calibrate \
+  --scores output/anomaly \
+  --output-dir output/anomaly_calibrated \
+  --cohort-mode knn_local \
+  --knn-k 20 \
+  --input output/aligned_log1p_tpm.tsv
+```

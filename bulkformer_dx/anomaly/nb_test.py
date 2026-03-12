@@ -13,9 +13,9 @@ import pandas as pd
 from bulkformer_dx.anomaly.calibration import benjamini_yekutieli
 from bulkformer_dx.io.schemas import AlignedExpressionBundle, MethodConfig, ModelPredictionBundle
 from bulkformer_dx.stats.dispersion import (
-    DispersionFitResult,
     fit_deseq2_trend,
     fit_nb_dispersion_mle,
+    fit_nb_dispersion_moments,
     shrink_dispersion_to_trend,
 )
 from bulkformer_dx.stats.nb import outrider_two_sided_nb_pvalue
@@ -97,8 +97,6 @@ def _fit_dispersions(
         if dispersion_method == "mle":
             res = fit_nb_dispersion_mle(mu_g, k_g)
         else:
-            from bulkformer_dx.stats.dispersion import fit_nb_dispersion_moments
-
             res = fit_nb_dispersion_moments(mu_g, k_g)
         alpha_by_gene[gid] = max(res.alpha, DISPERSION_EPS)
         mean_counts_by_gene[gid] = float(np.mean(mu[:, g]))
