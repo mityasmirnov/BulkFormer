@@ -97,7 +97,18 @@ def load_counts_matrix(
     gene_column: str | None = None,
     sample_column: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int | str]]:
-    """Load raw counts into a sample-by-gene matrix."""
+    """Load raw counts into a sample-by-gene matrix.
+
+    Supported input layouts:
+    - `genes-by-samples` (default): first column is gene id, remaining columns
+      are samples.
+    - `samples-by-genes`: rows are samples and columns are genes; optionally
+      with a dedicated sample id column.
+
+    Returns a normalized matrix in canonical orientation `(n_samples, n_genes)`
+    plus metadata describing inferred shape and any duplicated genes collapsed
+    after Ensembl version stripping.
+    """
     counts_table = _read_table(counts_path)
     if counts_table.empty:
         raise ValueError("The counts table is empty.")
@@ -109,6 +120,9 @@ def load_counts_matrix(
         )
 
     if orientation == "genes-by-samples":
+        # Most external count matrices provide Ensembl IDs in the first column.
+        # We normalize them and transpose so all downstream code can assume
+        # a sample-by-gene contract.
         resolved_gene_column = gene_column or str(counts_table.columns[0])
         if resolved_gene_column not in counts_table.columns:
             raise ValueError(
@@ -125,6 +139,9 @@ def load_counts_matrix(
         sample_by_gene.columns = gene_ids
         sample_by_gene.index.name = "sample_id"
     else:
+        # For samples-by-genes input, detect whether the first column looks like
+        # a sample identifier or a gene id column from accidental orientation
+        # confusion and handle both safely.
         working_table = counts_table.copy()
         resolved_sample_column = sample_column
         normalized_columns = [normalize_ensembl_id(column) for column in working_table.columns]
@@ -150,6 +167,8 @@ def load_counts_matrix(
             sample_by_gene.index = [f"sample_{index + 1}" for index in range(len(sample_by_gene))]
         sample_by_gene.index.name = "sample_id"
 
+    # Remove columns that failed Ensembl normalization and collapse duplicate
+    # columns created after dropping version suffixes (e.g. ENSG...1/.2).
     sample_by_gene = sample_by_gene.loc[:, [column is not None for column in sample_by_gene.columns]]
     sample_by_gene, collapsed_gene_columns = _collapse_duplicate_columns(sample_by_gene)
     sample_by_gene = sample_by_gene.astype(float)
@@ -169,7 +188,11 @@ def load_gene_lengths(
     gene_id_column: str | None = None,
     length_column: str | None = None,
 ) -> tuple[dict[str, float], dict[str, int | str]]:
-    """Load gene lengths keyed by normalized Ensembl gene identifiers."""
+    """Load gene lengths keyed by normalized Ensembl gene identifiers.
+
+    Lengths are resolved from an explicit length column when available; if not,
+    genomic start/end coordinates are used to derive a positive span.
+    """
     annotation_table = _read_table(annotation_path)
     if annotation_table.empty:
         raise ValueError("The annotation table is empty.")
@@ -233,7 +256,12 @@ def counts_to_tpm(
     *,
     missing_gene_length_bp: float = DEFAULT_MISSING_GENE_LENGTH_BP,
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Convert raw counts to TPM using gene-length normalization."""
+    """Convert raw counts to TPM using gene-length normalization.
+
+    Any gene without an annotation length falls back to
+    `missing_gene_length_bp`, and its id is included in the returned
+    `missing_lengths` list for reporting/QC.
+    """
     if missing_gene_length_bp <= 0:
         raise ValueError("Missing gene length fallback must be positive.")
 

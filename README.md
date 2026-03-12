@@ -190,6 +190,11 @@ Key docs:
 
 Supporting docs live in `docs/bulkformer-dx/`.
 
+Additional contributor-facing inventories:
+
+- `bulkformer_dx/README.md`: script-by-script module map for the diagnostics package.
+- `notebooks/README.md`: notebook-by-notebook workflow guide and usage conventions.
+
 ### Anomaly Benchmarking and Reports
 
 The repo includes a full benchmarking pipeline for anomaly detection with reproducible reports and notebooks.
@@ -321,5 +326,4 @@ Boming Kang <kangbm@bjmu.edu.cn>
 Qinghua Cui <cuiqinghua@bjmu.edu.cn>
 
 Dmitrii (Dima) Smirnov <mitya.smirnov@gmail.com>
-
 

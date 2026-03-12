@@ -9,7 +9,13 @@ from . import anomaly, benchmark, embeddings, preprocess, predict_cli, proteomic
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level parser for the diagnostics toolkit."""
+    """Build the top-level parser for the diagnostics toolkit.
+
+    Notes:
+    - This function is intentionally the single place where top-level
+      subcommands are registered so `--help` output remains discoverable.
+    - Each submodule owns its own argument contract via `register_parser`.
+    """
     parser = argparse.ArgumentParser(
         prog="bulkformer-dx",
         description=(
@@ -32,10 +38,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI and dispatch to the selected subcommand."""
+    """Run the CLI and dispatch to the selected subcommand.
+
+    The dispatch contract is simple: subparsers set `args.func` to a callable
+    that accepts the parsed namespace and returns an optional integer exit code.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # Subcommands register a handler callback on the namespace. If no
+    # subcommand is provided, print root help and exit cleanly.
     handler = getattr(args, "func", None)
     if handler is None:
         parser.print_help()

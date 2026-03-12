@@ -96,7 +96,13 @@ def discover_checkpoint_path(
     checkpoint_path: str | Path | None = None,
     model_dir: Path = DEFAULT_MODEL_DIR,
 ) -> tuple[str, Path]:
-    """Resolve a checkpoint path, preferring the local 37M asset for auto mode."""
+    """Resolve a checkpoint path, preferring the local 37M asset for auto mode.
+
+    Resolution order:
+    1. Explicit `checkpoint_path`.
+    2. Candidate filenames for the requested variant.
+    3. Auto-scan of known variants (lightweight 37M first).
+    """
     if checkpoint_path is not None:
         resolved_checkpoint = _require_existing_path(Path(checkpoint_path), asset_kind="checkpoint")
         resolved_variant = normalize_model_variant(
@@ -164,6 +170,7 @@ def resolve_bulkformer_assets(
 
 
 def _unwrap_state_dict(checkpoint_object: Any) -> Mapping[str, Any]:
+    """Extract a tensor-keyed state dict from common checkpoint wrappers."""
     if not isinstance(checkpoint_object, Mapping):
         raise TypeError(
             "Expected a checkpoint mapping or a mapping with a nested state dict."
@@ -213,6 +220,7 @@ def load_checkpoint_state_dict(checkpoint_path: str | Path) -> OrderedDict[str, 
 
 
 def _extract_graph_rows_and_cols(graph_object: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    """Normalize supported graph payloads into `(row, col)` tensors."""
     if isinstance(graph_object, Mapping):
         if "edge_index" in graph_object:
             edge_index = graph_object["edge_index"]
@@ -251,6 +259,7 @@ def build_bulkformer_graph(
     Falls back to (edge_index, edge_weight) when SparseTensor import or construction
     fails (e.g. torch-sparse unavailable on CPU). BulkFormer_block accepts both.
     """
+    # Load assets on CPU for robustness, then move to the requested device.
     graph_object = torch.load(Path(graph_path), map_location="cpu", weights_only=False)
     weights = torch.load(Path(graph_weights_path), map_location="cpu", weights_only=False)
     row, col = _extract_graph_rows_and_cols(graph_object)
@@ -258,7 +267,8 @@ def build_bulkformer_graph(
         weights = torch.as_tensor(weights)
     resolved_device = torch.device(device)
 
-    # Prefer SparseTensor for GPU (torch-sparse); fallback for CPU / broken torch-sparse
+    # Prefer SparseTensor for throughput; fallback to edge_index form when
+    # torch-sparse is unavailable or SparseTensor construction fails.
     try:
         from torch_geometric.typing import SparseTensor
 
