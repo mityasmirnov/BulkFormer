@@ -133,7 +133,14 @@ def generate_mc_mask_plan(
     mask_prob: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Create a sample-by-pass-by-gene masking plan over valid genes only."""
+    """Create a sample-by-pass-by-gene masking plan over valid genes only.
+
+    Shape contract:
+    - output: `(n_samples, mc_passes, n_genes)` boolean mask
+    - `True` entries indicate genes masked during a given MC pass
+
+    The plan always masks at least one valid gene per pass.
+    """
     valid_gene_flags = np.asarray(valid_gene_flags, dtype=bool)
     if valid_gene_flags.ndim != 1:
         raise ValueError("Valid gene flags must be a 1D boolean array.")
@@ -176,6 +183,7 @@ def _validate_mask_plan(
     gene_count: int,
     valid_gene_flags: np.ndarray,
 ) -> np.ndarray:
+    """Validate externally provided mask plans against scoring invariants."""
     resolved_mask_plan = np.asarray(mask_plan, dtype=bool)
     expected_shape = (sample_count, mc_passes, gene_count)
     if resolved_mask_plan.shape != expected_shape:
@@ -212,6 +220,11 @@ def _predict_masked_expression(
     predictor: Predictor,
     fill_value: float,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Predict expression for a masked matrix grouped by mask fraction.
+
+    Grouping rows by their effective mask ratio lets predictors that condition
+    on mask intensity run once per unique fraction instead of once per row.
+    """
     row_mask_fractions = (masked_expression == fill_value).mean(axis=1)
     predicted = np.empty_like(masked_expression, dtype=float)
     for mask_fraction in np.unique(row_mask_fractions):
@@ -241,7 +254,15 @@ def score_expression_anomalies(
     random_seed: int = DEFAULT_RANDOM_SEED,
     mask_plan: np.ndarray | None = None,
 ) -> AnomalyScoringResult:
-    """Score anomalies by repeatedly masking valid genes and aggregating residuals."""
+    """Score anomalies by repeatedly masking valid genes and aggregating residuals.
+
+    Core algorithm:
+    1. Build/validate MC mask plan over valid genes only.
+    2. For each pass, mask observed expression with `fill_value`.
+    3. Predict masked expression from the frozen BulkFormer predictor.
+    4. Aggregate residual statistics per sample/gene.
+    5. Emit ranked per-sample tables and cohort-level QC summaries.
+    """
     if expression.empty:
         raise ValueError("Expression matrix must contain at least one sample.")
 
@@ -254,6 +275,8 @@ def score_expression_anomalies(
     valid_gene_flags = resolve_valid_gene_flags(valid_gene_mask, expression.columns)
     valid_gene_count = int(valid_gene_flags.sum())
     rng = np.random.default_rng(random_seed)
+    # Allow deterministic tests to inject a fixed mask plan while preserving
+    # strict shape and valid-gene constraints.
     resolved_mask_plan = (
         generate_mc_mask_plan(
             valid_gene_flags,
