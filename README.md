@@ -220,6 +220,7 @@ All analysis uses **CUDA** by default (`--device cuda`). Override with `CONDA_EN
 - `reports/bulkformer_dx_demo_report.md` — Demo QC, spike recovery, AUROC/AUPRC/recall@FDR
 - `reports/bulkformer_dx_clinical_report.md` — Clinical 37M
 - `reports/bulkformer_dx_clinical_report_147M.md` — Clinical 147M
+- `reports/HARMONIZED_REPORT_TEMPLATE.md` — Unified report section/table format for future runs
 
 **Benchmark plots** (`bulkformer_dx/benchmark/plots.py`): PR curve, p-value histogram, QQ plot for calibration diagnostics.
 
