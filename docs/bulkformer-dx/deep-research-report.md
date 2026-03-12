@@ -376,6 +376,34 @@ Unit-test intent: the modified calibration tests exercise the new leave-one-out 
 
 
 Extra ToDo:
-- Add preprocessing equivalent to OUTRIDER FPKM > 1
+- Test if this will iomprove perfomance by removing low quality (coverage) genes - Add preprocessing equivalent to OUTRIDER FPKM > 1 (t is recommended to preprocess the data before fitting. Our model requires that for
+every gene at least one sample has a non-zero count and that we observe at least
+one read for every 100 samples. Therefore, all genes that are not expressed must be
+discarded.
+We provide the function filterExpression to remove genes that have low FPKM
+(Fragments Per Kilobase of transcript per Million mapped reads) expression values.
+The needed annotation to estimate FPKM values from the counts should be the
+same as for the counting. Here, we normalize by the total exon length of a gene. To
+do so the joint lenght of all exons needs to be provided. When providing a gtf, gff
+or TxDb object to the filterExpression, we extract this information automatically.
+But therfore the geneID’s of the count table and the gtf need to match.
+By default the cutoff is set to an FPKM value of one and only the filtered OutriderDataSet object is returned. If required, the FPKM values can be stored in theOutriderDataSet object and the full object can be returned to visualize the distribution of reads before and after filtering.# get annotationlibrary(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(org.Hs.eg.db)
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene7OUTRIDER - OUTlier in RNA-Seq fInDERmap <- select(org.Hs.eg.db, keys=keys(txdb, keytype = "GENEID"),
+keytype="ENTREZID", columns=c("SYMBOL"))However, the TxDb.Hsapiens.UCSC.hg19.knownGene contains only well annotated
+genes. This annotation will miss a lot of genes captured by RNA-seq. To include all
+predicted annotations as well as non-coding RNAs please download the txdb object
+from our homepage1 or create it yourself from the UCSC website2,3.try({
+library(RMariaDB)
+library(AnnotationDbi)
+con <- dbConnect(MariaDB(), host='genome-mysql.cse.ucsc.edu',
+dbname="hg19", user='genome')
+map <- dbGetQuery(con, 'select kgId AS TXNAME, geneSymbol from kgXref')
+txdbUrl <- paste0("https://cmm.in.tum.de/public/",
+"paper/mitoMultiOmics/ucsc.knownGenes.db")
+download.file(txdbUrl, "ucsc.knownGenes.db")
+txdb <- loadDb("ucsc.knownGenes.db")
+})# calculate FPKM values and label not expressed genesods <- filterExpression(ods, txdb, mapping=map,
+filterGenes=FALSE, savefpkm=TRUE)# display the FPKM distribution of counts.plotFPKM(ods))
 - Switch to G_tcga as it is latest
-- Download and preprocess RCHS4 data - split it by tissues
+- Download and preprocess ARCHS4 data - split it by tissues
