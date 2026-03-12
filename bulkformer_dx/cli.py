@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from . import anomaly, embeddings, preprocess, proteomics, tissue
+from . import anomaly, embeddings, preprocess, predict_cli, proteomics, tissue
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     preprocess.register_parser(subparsers)
+    predict_cli.register_parser(subparsers)
     anomaly.register_parser(subparsers)
     embeddings.register_parser(subparsers)
     tissue.register_parser(subparsers)
