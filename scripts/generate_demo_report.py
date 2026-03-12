@@ -80,6 +80,18 @@ def main() -> int:
     sig_before = qc_summary.get("spike_targets_significant_before", 0)
     sig_after = qc_summary.get("spike_targets_significant_after", 0)
 
+    # Calibration Diagnostics
+    cal_diag = calibration_run.get("calibration_diagnostics", {}).get("absolute_zscore", {})
+    ks_stat = cal_diag.get("ks_stat", "?")
+    min_p = cal_diag.get("min_p", "?")
+    discovery_rows = []
+    dt = cal_diag.get("discovery_table", {})
+    if dt:
+        for alpha_val in ["0.001", "0.01", "0.05"]:
+            if alpha_val in dt:
+                d = dt[alpha_val]
+                discovery_rows.append(f"| α={alpha_val} | {d['expected']} | {d['observed']} | {d['ratio']} |")
+
     auroc = qc_summary.get("auroc", None)
     auprc = qc_summary.get("auprc", None)
     recall_fdr05 = qc_summary.get("recall_at_fdr_05", None)
@@ -148,12 +160,27 @@ def main() -> int:
         f"| Mean cohort abs residual | {mean_abs:.4f} |",
         f"| Valid genes | {anomaly_run.get('valid_gene_count', '?')} |",
         "",
-        "### Calibration And Spike Recovery",
+        "### Calibration Diagnostics",
         "",
         "| Metric | Value |",
         "| --- | ---: |",
         f"| Mean empirical BY significant genes per sample | {emp_mean} |",
         f"| Mean absolute-outlier significant genes per sample | {abs_mean:.2f} |",
+        f"| KS Statistic (absolute z-score path) | {ks_stat} |",
+        f"| Min raw p-value | {min_p} |",
+        "",
+        "#### Discovery Table (Absolute z-score path)",
+        "",
+        "| α threshold | Expected | Observed | Ratio |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    report_lines.extend(discovery_rows)
+    report_lines.extend([
+        "",
+        "### Spike Recovery",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
         f"| Spike target pairs evaluated | {spike_targets} |",
         f"| Spike targets scored before / after | {scored_before} / {scored_after} |",
         f"| Spike rank improvement median | {rank_improvement_med} |",
@@ -161,7 +188,7 @@ def main() -> int:
         f"| Spike targets in top 100 before / after | {top100_before} / {top100_after} |",
         f"| Spike targets significant before / after | {sig_before} / {sig_after} |",
         "",
-    ]
+    ])
 
     if auroc is not None and auprc is not None:
         report_lines.extend([
@@ -201,6 +228,10 @@ def main() -> int:
         "![Absolute z-scores](figures/calibration_absolute_zscore_hist.png)",
         "",
         "![Absolute BY-adjusted p-values](figures/calibration_absolute_by_p_hist.png)",
+        "",
+        "![P-value QQ Plot](figures/calibration_qq_cohort_37M.png)",
+        "",
+        "![Expected vs Observed Discoveries](figures/calibration_discoveries_37M.png)",
         "",
         "### Spike Recovery",
         "",

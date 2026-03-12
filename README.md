@@ -12,6 +12,7 @@
 - **Spike injection** (`scripts/demo_spike_inject.py`): controlled outlier injection for validation
 - **Benchmark metrics** (`scripts/spike_recovery_metrics.py`): AUROC, AUPRC, recall@FDR, PR curves, QQ plots
 - **Reproducible notebooks**: `notebooks/bulkformer_dx_demo_37M.ipynb`, `notebooks/bulkformer_dx_clinical_37M_147M.ipynb`, `notebooks/bulkformer_dx_clinical_methods_comparison.ipynb`
+- **Unified export** (`scripts/export_unified_clinical_outliers.py`): merges calibration results into a single OUTRIDER-style long-format TSV for R
 - **CUDA by default**: all anomaly scoring and embeddings use `--device cuda`; override with `--device cpu` or `--device mps` (macOS)
 
 ### 🔹 2. Removed compound perturbation prediction task  

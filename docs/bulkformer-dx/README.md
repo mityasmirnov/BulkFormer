@@ -29,3 +29,7 @@ All four workflows are now implemented with unit tests and working CLIs:
 - `proteomics.md`: RNA-to-proteomics prediction and protein outlier ranking
 
 See the workflow docs in this directory for end-to-end command examples.
+
+## Export for R
+
+After running the clinical methods comparison notebook, use `scripts/export_unified_clinical_outliers.py` to produce a single long-format TSV (`unified_outliers.tsv`) with SampleID, GeneID, Gene_Name, known_causal_gene, is_known_causal_gene, and per-method z-scores and p-values. Suitable for `read.delim()` in R.
