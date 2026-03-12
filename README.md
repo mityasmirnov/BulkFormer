@@ -214,19 +214,30 @@ All analysis uses **CUDA** by default (`--device cuda`). Override with `CONDA_EN
 - `scripts/spike_recovery_metrics.py` — Compute AUROC, AUPRC, recall@FDR, spike_recovery.tsv, benchmark figures
 - `scripts/generate_demo_report.py` — Generate `reports/bulkformer_dx_demo_report.md` with full benchmarking
 - `scripts/generate_clinical_report.py` — Generate clinical reports for 37M and 147M
+- `scripts/generate_browse_report.py` — Generate `reports/bulkformer_dx_unified_outliers_browse_report.md` from unified outliers
 
 **Notebooks** (run from repo root with `PYTHONPATH=.`):
 
 - `notebooks/bulkformer_dx_demo_37M.ipynb` — Reproduces demo pipeline (preprocess → spike → anomaly → calibrate → metrics → report)
 - `notebooks/bulkformer_dx_clinical_37M_147M.ipynb` — Reproduces clinical pipeline for 37M and 147M
 - `notebooks/bulkformer_dx_clinical_methods_comparison.ipynb` — Clinical 37M with all calibration methods (none, nb_approx, nb_outrider) and comparison figures
+- `notebooks/browse_unified_outliers.ipynb` — Browse unified outliers: volcano plots, gene rank plots, recall figures
 
 **Reports** (see `reports/README.md`):
 
 - `reports/bulkformer_dx_demo_report.md` — Demo QC, spike recovery, AUROC/AUPRC/recall@FDR
 - `reports/bulkformer_dx_clinical_report.md` — Clinical 37M
 - `reports/bulkformer_dx_clinical_report_147M.md` — Clinical 147M
+- `reports/bulkformer_dx_unified_outliers_browse_report.md` — Unified outliers browse: causal recall, method comparison, volcano/gene rank figures
 - `reports/HARMONIZED_REPORT_TEMPLATE.md` — Unified report section/table format for future runs
+
+**Clinical Calibration Method Comparison**
+
+- **NB-Outrider** is the recommended method: best p-value calibration (KS 0.027), balanced outlier counts (median 8), best causal gene recall.
+- **kNN-Local** fails on the homogeneous fibroblast cohort (0 recall, median 159 outliers).
+- **Student-t** is highly conservative (median 0 outliers); same recall as NB-Outrider but almost no discoveries.
+- **Gene-wise centering** is essential for z-score methods.
+- Run `notebooks/browse_unified_outliers.ipynb` after `scripts/export_unified_clinical_outliers.py` for volcano plots, gene rank plots, and recall figures.
 
 **Benchmark plots** (`bulkformer_dx/benchmark/plots.py`): PR curve, p-value histogram, QQ plot for calibration diagnostics.
 

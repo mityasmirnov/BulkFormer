@@ -9,6 +9,7 @@ Reports document preprocessing, anomaly scoring, calibration, and benchmark metr
 | `bulkformer_dx_demo_report.md` | Demo pipeline (37M): preprocess, spike inject, anomaly score, calibrate, benchmark metrics |
 | `bulkformer_dx_clinical_report.md` | Clinical pipeline (37M): preprocess, anomaly score, calibrate, embeddings |
 | `bulkformer_dx_clinical_report_147M.md` | Clinical pipeline (147M): anomaly score, calibrate (alpha=0.01), embeddings |
+| `bulkformer_dx_unified_outliers_browse_report.md` | Unified outliers browse: causal recall, method comparison, volcano/gene rank figures |
 | `HARMONIZED_REPORT_TEMPLATE.md` | Canonical section order and tables for demo/clinical/method-comparison reporting |
 
 ## Benchmarking Fields
@@ -36,7 +37,10 @@ ALPHA=0.01 bash scripts/run_clinical_147M.sh
 # Report-only (after pipeline has run)
 PYTHONPATH=. python scripts/generate_demo_report.py
 PYTHONPATH=. python scripts/generate_clinical_report.py --variant both
+PYTHONPATH=. python scripts/generate_browse_report.py
 ```
+
+(Requires `scripts/export_unified_clinical_outliers.py` and `notebooks/bulkformer_dx_clinical_methods_comparison.ipynb` to have been run first for the browse report.)
 
 ## Figures
 
