@@ -61,7 +61,7 @@ def test_calibrate_ranked_gene_scores_adds_empirical_pvalues() -> None:
     assert "by_adj_p_value" in sample_a.columns
     assert "is_significant" in sample_a.columns
     assert np.isclose(sample_a.loc[0, "empirical_p_value"], 0.2)
-    assert np.isclose(sample_a.loc[0, "by_q_value"], 0.4)
+    assert np.isclose(sample_a.loc[0, "by_q_value"], 0.6)
     assert np.isclose(sample_a.loc[1, "empirical_p_value"], 1.0)
     assert sample_a.loc[0, "empirical_p_value"] < sample_a.loc[1, "empirical_p_value"]
     assert set(result.absolute_outliers.columns) >= {
