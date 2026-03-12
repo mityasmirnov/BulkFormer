@@ -245,7 +245,12 @@ def build_bulkformer_graph(
     *,
     device: str | torch.device = "cpu",
 ) -> Any:
-    """Build the sparse graph object expected by `utils.BulkFormer.BulkFormer`."""
+    """Build the sparse graph object expected by `utils.BulkFormer.BulkFormer`.
+
+    Prefers SparseTensor (PyG) when torch-sparse is available—recommended for GPU.
+    Falls back to (edge_index, edge_weight) when SparseTensor import or construction
+    fails (e.g. torch-sparse unavailable on CPU). BulkFormer_block accepts both.
+    """
     graph_object = torch.load(Path(graph_path), map_location="cpu", weights_only=False)
     weights = torch.load(Path(graph_weights_path), map_location="cpu", weights_only=False)
     row, col = _extract_graph_rows_and_cols(graph_object)
@@ -253,11 +258,14 @@ def build_bulkformer_graph(
         weights = torch.as_tensor(weights)
     resolved_device = torch.device(device)
 
+    # Prefer SparseTensor for GPU (torch-sparse); fallback for CPU / broken torch-sparse
     try:
         from torch_geometric.typing import SparseTensor
 
-        return SparseTensor(row=row, col=col, value=weights).t().to(resolved_device)
-    except (ImportError, Exception):
+        graph = SparseTensor(row=row, col=col, value=weights).t().to(resolved_device)
+        return graph
+    except Exception:
+        # torch-sparse unavailable or SparseTensor construction failed (e.g. on CPU)
         edge_index = torch.stack([col, row], dim=0).long().to(resolved_device)
         edge_weight = weights.to(resolved_device)
         return (edge_index, edge_weight)

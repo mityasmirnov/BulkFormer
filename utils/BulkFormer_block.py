@@ -28,6 +28,7 @@ class BulkFormer_block(nn.Module):
 
     def forward(self, x, graph):
         # === 图卷积 ===
+        # graph: SparseTensor (GPU, preferred) or (edge_index, edge_weight) tuple (CPU fallback)
         x = self.layernorm(x)
         if isinstance(graph, tuple):
             edge_index, edge_weight = graph
