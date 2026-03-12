@@ -82,8 +82,7 @@ def register_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     parser.add_argument(
         "--valid-gene-mask",
-        required=True,
-        help="Path to valid_gene_mask.tsv from preprocessing.",
+        help="Path to valid_gene_mask.tsv from preprocessing. Optional if --input is a directory.",
     )
     parser.add_argument(
         "--output-dir",
@@ -119,12 +118,18 @@ def _run_extract(args: argparse.Namespace) -> int:
     if args.mode != "extract":
         return 1
     input_path = Path(args.input)
-    valid_gene_mask_path = Path(args.valid_gene_mask)
     output_dir = Path(args.output_dir)
+    if input_path.is_dir():
+        expr_path = input_path / "aligned_log1p_tpm.tsv"
+        valid_mask_path = input_path / "valid_gene_mask.tsv"
+    else:
+        expr_path = input_path
+        if args.valid_gene_mask is None:
+            raise ValueError("--valid-gene-mask is required when --input is a file.")
+        valid_mask_path = Path(args.valid_gene_mask)
 
-
-    expression = load_aligned_expression(input_path)
-    valid_gene_mask = load_valid_gene_mask(valid_gene_mask_path)
+    expression = load_aligned_expression(expr_path)
+    valid_gene_mask = load_valid_gene_mask(valid_mask_path)
     valid_gene_flags = resolve_valid_gene_flags(valid_gene_mask, expression.columns)
 
     embeddings = extract_embeddings(

@@ -372,8 +372,18 @@ def run(args: argparse.Namespace) -> int:
 
 def _run_residual(args: argparse.Namespace) -> int:
     """Execute residual-based anomaly scoring."""
-    expression = load_aligned_expression(Path(args.input))
-    valid_gene_mask = load_valid_gene_mask(Path(args.valid_gene_mask))
+    input_path = Path(args.input)
+    if input_path.is_dir():
+        expr_path = input_path / "aligned_log1p_tpm.tsv"
+        valid_mask_path = input_path / "valid_gene_mask.tsv"
+    else:
+        expr_path = input_path
+        if args.valid_gene_mask is None:
+            raise ValueError("--valid-gene-mask is required when --input is a file.")
+        valid_mask_path = Path(args.valid_gene_mask)
+
+    expression = load_aligned_expression(expr_path)
+    valid_gene_mask = load_valid_gene_mask(valid_mask_path)
     model_kwargs: dict[str, Any] = {
         "variant": args.variant,
         "checkpoint_path": args.checkpoint_path,

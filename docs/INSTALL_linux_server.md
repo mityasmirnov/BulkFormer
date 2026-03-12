@@ -240,6 +240,22 @@ Look for:
 - do not start BulkFormer runs until `./scripts/dev/verify_env.sh bulkformer-cuda linux-cuda` passes
 - the Linux goal is to have the real sparse stack healthy, not to rely on a degraded setup
 
+### PyG extension warnings (pyg-lib, torch-scatter, torch-sparse, etc.)
+
+If you see `UserWarning: An issue occurred while importing 'torch-scatter'` or similar, the PyG extension wheels are built for a different PyTorch/CUDA version than your environment. Fix:
+
+1. Check your PyTorch and CUDA versions:
+   ```bash
+   python -c "import torch; print(torch.__version__, torch.version.cuda)"
+   ```
+2. Reinstall matching wheels from the [PyG wheel index](https://data.pyg.org/whl/):
+   ```bash
+   pip install --force-reinstall --no-cache-dir torch_scatter torch_sparse torch_cluster torch_spline_conv \
+     -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
+   ```
+   Replace `${TORCH}` and `${CUDA}` with your versions (e.g. `2.10.0` and `cu128`).
+3. If `pyg_lib` has no matching wheel, uninstall it: `pip uninstall pyg_lib`. The other extensions work without it; BulkFormer uses `torch_sparse` for `SparseTensor` on GPU.
+
 ### Wrong Python interpreter
 
 Prefer:

@@ -30,8 +30,7 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
     )
     score_parser.add_argument(
         "--valid-gene-mask",
-        required=True,
-        help="Path to the valid_gene_mask.tsv file emitted by preprocessing.",
+        help="Path to the valid_gene_mask.tsv file emitted by preprocessing. Optional if --input is a directory.",
     )
     score_parser.add_argument(
         "--output-dir",
