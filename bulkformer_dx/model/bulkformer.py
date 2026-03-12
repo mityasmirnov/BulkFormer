@@ -158,6 +158,10 @@ def predict(
     Returns:
         ModelPredictionBundle with y_hat, embedding, and optional sigma_hat/mc_samples.
     """
+    merged_kwargs = dict(model_kwargs) if model_kwargs else {}
+    if model_dir is not None:
+        merged_kwargs["model_dir"] = model_dir
+
     if method_config.mc_passes > 0:
         pred_bundle, _ = mc_predict(
             bundle,
@@ -169,7 +173,7 @@ def predict(
             variant=variant,
             checkpoint_path=checkpoint_path,
             device=device,
-            model_kwargs=model_kwargs,
+            model_kwargs=merged_kwargs,
         )
         return pred_bundle
     return predict_mean(
