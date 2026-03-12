@@ -1,5 +1,7 @@
 # Cursor Prompt: BulkFormer Outlier Detection Benchmarking Plan Inspired by OUTRIDER and TabPFN
 
+![Anomaly Detection Pipeline](file:///home/smirnov/projects/BulkFormer/docs/bulkformer-dx/anomaly_detection_pipeline.png)
+
 ## Core references and what they imply for implementation choices
 
 You are implementing and benchmarking **multiple outlier/anomaly scoring + statistical testing** variants for bulk RNA-seq, using **BulkFormer** as the predictive engine, and using OUTRIDER- and TabPFN-inspired probability tests.
@@ -429,3 +431,359 @@ You will not pick the “best” distribution by intuition; you will pick it by 
   - ranking quality (AUPRC),
   - stability vs masking/permutations,
   - and usefulness in N=1 contexts (does it still highlight the injected genes?) citeturn20search0turn21search2
+
+
+
+  ## Package layout (suggested)
+
+bulkformer_dx/
+  cli/
+    main.py                 # entrypoints: preprocess / score / calibrate / benchmark
+  io/
+    read_write.py           # parquet/tsv helpers, schema validation
+    schemas.py              # artifact schemas + validation
+  preprocess/
+    align.py                # gene panel alignment, masks, missingness handling
+    tpm.py                  # counts->TPM/log1p + required scaling stats
+  model/
+    bulkformer.py           # load model, forward masked, export embeddings
+    uncertainty.py          # sigma head + MC variance estimators
+  scoring/
+    residual.py             # your current baseline (MC masking residual)
+    pseudolikelihood.py     # TabPFN-like log-prob aggregation via masking
+  stats/
+    gaussian.py             # N(y|mu,sigma), Student-t, robust z
+    nb.py                   # NB pmf/cdf + OUTRIDER 2-sided pvalue
+    dispersion.py           # per-gene MLE + trend + shrinkage
+  cohort/
+    global.py               # use all samples
+    knn.py                  # kNN in embedding space -> local cohort
+  calibration/
+    pvalues.py              # empirical-tail, z->p, NB->p
+    multitest.py            # BY/BH/none (within-sample)
+  benchmark/
+    datasets.py             # loaders + caching
+    inject.py               # controlled spike-in anomalies
+    metrics.py              # AUROC/AUPRC, recall@FDR, calibration stats
+    plots.py                # QQ, p-hist, dispersion trends, PR curves
+    runner.py               # config grid runner -> standardized artifacts
+  reports/
+    templates/              # per-step report templates (md)
+
+
+## Core interfaces (the “contract” everything plugs into)
+
+### 1) Common data container (after preprocess)
+
+AlignedExpressionBundle
+  expr_space: "log1p_tpm" | "tpm" | "counts"
+  Y_obs:  (n_samples, n_genes) float32  # log1p(TPM) OR counts as float
+  counts: (n_samples, n_genes) int32?   # present if raw counts provided
+  valid_mask: (n_samples, n_genes) bool # gene present + usable
+  gene_ids: list[str]
+  sample_ids: list[str]
+  gene_length_kb: (n_genes,) float32?   # optional but required for NB mapping
+  tpm_scaling_S: (n_samples,) float32?  # S_j = sum_h counts/L_kb (required for mu_count mapping)
+  metadata: sample-level covariates (optional)
+
+
+### 2) BulkFormer inference outputs
+ModelPredictionBundle
+  y_hat: (n_samples, n_genes) float32          # predicted mean in expr_space
+  sigma_hat: (n_samples, n_genes) float32?     # optional (sigma head or derived)
+  embedding: (n_samples, d) float32?           # sample embedding for kNN cohort
+  mc_samples: (n_mc, n_samples, n_genes)?      # optional, if you store MC preds
+
+### 3) Scoring/Test outputs (unified)
+GeneOutlierTable (long format)
+  sample_id, gene_id
+  y_obs, y_hat
+  residual
+  score_gene                     # e.g., abs residual or NLL contribution
+  p_raw                          # optional (if test yields p)
+  p_adj                          # after within-sample correction
+  direction                       # under/over
+  method_id                       # full config hash
+  diagnostics_json                # e.g., sigma used, mu_count, alpha_g, etc.
+
+SampleOutlierTable
+  sample_id
+  score_sample                    # e.g., mean residual or sum NLL
+  cohort_mode
+  method_id
+
+
+
+## Statistical “engines” as swappable plugins
+### MethodConfig schema (YAML/JSON)
+
+method_id: "nb_outrider_bulkformer_v1"
+space: "counts"                  # counts | log1p_tpm
+cohort:
+  mode: "global"                 # global | knn
+  knn_k: 50
+uncertainty:
+  source: "dispersion"           # dispersion | sigma_head | cohort_sigma | mc_variance
+distribution:
+  family: "negative_binomial"    # negative_binomial | gaussian | student_t
+test:
+  type: "outrider_nb_2s"         # outrider_nb_2s | zscore_2s | empirical_tail | pseudo_likelihood
+multiple_testing:
+  correction: "BY"               # BY | BH | none
+  alpha: 0.05
+runtime:
+  mc_passes: 50                  # for MC masking methods
+  mask_rate: 0.15
+  seed: 0
+outputs:
+  write_gene_table: true
+  write_sample_table: true
+  write_diagnostics: true
+
+
+TabPFN unsupervised: what to copy and what to fix for BulkFormer
+
+What TabPFN extensions do: they compute an outlier score as a sample probability via the chain rule, and they average across random feature permutations for stability.
+Implementation detail: they accumulate in log space (good), but for continuous features they include a hack using 1/pdf to avoid overflow, which inverts interpretation and should be avoided in your adaptation.
+They run outliers_single_permutation_ for each permutation and then average densities.
+
+BulkFormer adaptation (recommended)
+
+BulkFormer is masked-conditional, so you can implement order-free pseudo-likelihood:
+
+PL-full (expensive, best reference): for each gene 
+𝑔
+g, mask only 
+𝑔
+g and compute 
+log
+⁡
+𝑝
+(
+𝑦
+𝑔
+∣
+𝑦
+−
+𝑔
+)
+logp(y
+g
+	​
+
+∣y
+−g
+	​
+
+); sum across genes.
+
+PL-mc (cheap, scalable): repeat random masking (like your current MC residual), but instead of residuals, accumulate log-probabilities for masked genes and average.
+
+You do not need permutations for correctness (BulkFormer conditions on “all unmasked”), but you can still use permutations / block schedules to stress-test dependence on masking context (helpful for debugging calibration failures).
+
+OUTRIDER-style NB test: where it lives in the architecture
+
+This is a stats/test plugin (stats/nb.py, stats/dispersion.py) used by a method config like space=counts, test=outrider_nb_2s.
+
+Key architectural requirement: preprocess must produce gene_length_kb and tpm_scaling_S so you can map predicted TPM to expected counts mean:
+
+𝜇
+^
+𝑗
+𝑔
+𝑐
+𝑜
+𝑢
+𝑛
+𝑡
+=
+𝑇
+𝑃
+𝑀
+^
+𝑗
+𝑔
+⋅
+𝑆
+𝑗
+10
+6
+⋅
+𝐿
+𝑔
+𝑘
+𝑏
+μ
+	​
+
+jg
+count
+	​
+
+=
+TPM
+jg
+	​
+
+⋅
+10
+6
+S
+j
+	​
+
+	​
+
+⋅L
+g
+kb
+	​
+
+
+Then compute the two-sided discrete-safe NB p-value (OUTRIDER-style) inside stats/nb.py.
+
+“Ralph method” debugging hooks (baked into the architecture)
+
+Every plugin must emit a small diagnostics_json per gene (or per batch) so you can run failure localization without re-running everything.
+
+Mandatory diagnostics artifacts per run
+
+Write these to output_dir/diagnostics/:
+
+Null calibration pack
+
+p-value histogram per sample (expect ~uniform)
+
+QQ plot vs Uniform(0,1)
+
+KS statistic vs Uniform(0,1)
+
+inflation factor: fraction of genes with p_adj < 0.05 per sample
+
+Distribution fit pack
+
+Gaussian/Student-t: residual QQ + tail plot; sigma distribution
+
+NB: mean–dispersion scatter, trend curve, Pearson residual histogram
+
+Sensitivity pack (on injected anomalies)
+
+AUROC/AUPRC (gene-level)
+
+recall@FDR (0.05, 0.1)
+
+calibration error (e.g., ECE-like binning on p-values under null)
+
+Stability pack
+
+performance vs MC passes
+
+rank correlation (Spearman) across seeds
+
+method agreement heatmap (Jaccard on top-K outliers)
+
+
+
+
+
+
+Ptompt 
+
+You are implementing “BulkFormer-DX 2.0” as a modular anomaly/outlier framework.
+
+GOAL
+- Support multiple scoring/testing methods behind one MethodConfig schema:
+  (A) MC residual baseline
+  (B) pseudo-likelihood (TabPFN-inspired) using BulkFormer masking
+  (C) OUTRIDER-style NB test in count space using BulkFormer mean
+  (D) global vs embedding-kNN local cohort calibration
+- Build a benchmark harness that exposes distribution misfit via calibration diagnostics.
+
+TODO 0 — Create core schemas + validators
+- Implement io/schemas.py with dataclasses (or pydantic) for:
+  - MethodConfig
+  - AlignedExpressionBundle
+  - ModelPredictionBundle
+  - GeneOutlierTable schema (required columns)
+  - SampleOutlierTable schema
+- Implement io/read_write.py utilities to load/write parquet + validate schemas.
+
+REPORT 0 (reports/step0_schema.md)
+- Include the schemas, required columns, and 1 example artifact tree.
+
+TODO 1 — Preprocess outputs must support NB mapping
+- In preprocess/tpm.py compute:
+  - aligned counts matrix
+  - TPM/log1p(TPM) matrix
+  - tpm_scaling_S per sample
+- In preprocess/align.py ensure:
+  - valid_mask is explicit (no fake -10 for missing counts)
+  - gene_length_kb aligned and validated
+- Add CLI: bulkformer_dx preprocess --counts counts.tsv --lengths lengths.tsv --out out_dir
+
+REPORT 1
+- QC: library sizes, S_j distribution, gene length coverage, %valid genes.
+
+TODO 2 — BulkFormer inference API
+- In model/bulkformer.py implement:
+  - predict_mean(bundle) -> ModelPredictionBundle(y_hat, embedding)
+  - optional: predict_sigma_head(...) -> sigma_hat
+  - optional: mc_predict(...) -> mc_samples or (mu, var)
+- Ensure deterministic seeding.
+
+REPORT 2
+- Sanity: reconstruction error on non-masked genes vs masked genes; embedding PCA.
+
+TODO 3 — Implement scoring plugins
+- scoring/residual.py: reproduce current MC residual score
+- scoring/pseudolikelihood.py:
+  - implement PL-mc: accumulate log p(y_g | context) for masked genes
+  - support distribution families: Gaussian, Student-t, NB (if counts available)
+- stats/gaussian.py: logpdf for Gaussian + Student-t
+- stats/nb.py: NB logpmf + OUTRIDER two-sided pvalue
+- stats/dispersion.py: per-gene alpha fit + trend + shrinkage
+
+REPORT 3
+- Stability vs mc_passes; residual vs NLL scatter; tail behavior plots.
+
+TODO 4 — Implement calibration + multiple testing
+- calibration/pvalues.py:
+  - empirical tail calibration (per gene or per sample)
+  - zscore_2s for gaussian/t
+  - NB p-values
+- calibration/multitest.py: BH + BY (within-sample)
+- cohort/knn.py: embedding kNN cohort selection
+
+REPORT 4
+- Null calibration (p-hist + QQ + KS) global vs kNN.
+- NB dispersion diagnostics.
+
+TODO 5 — Benchmark harness
+- benchmark/inject.py: controlled up/down spikes (counts space and logTPM space)
+- benchmark/runner.py: grid-run of MethodConfig YAML list
+- benchmark/metrics.py + plots.py: leaderboard + calibration suite
+- CLI: bulkformer_dx benchmark --config methods.yaml --data dataset_spec.yaml
+
+REPORT 5 (final)
+- Leaderboard: AUPRC primary; recall@FDR; runtime.
+- Calibration table: KS under null; inflation of significant calls.
+- Figures: PR curves, QQ plots, NB dispersion trend, performance vs mc_passes.
+
+Ralph loop integration
+- After each TODO step, run unit tests + a small synthetic benchmark.
+- If calibration fails: inspect the distribution fit pack first (QQ/dispersion), then fix.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
