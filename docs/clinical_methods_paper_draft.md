@@ -637,7 +637,22 @@ To illustrate the clinical utility of BulkFormer-DX, we present a detailed inter
 
 ### 6.12 Unified Outliers Browse Analysis
 
-To systematically compare calibration methods on the clinical cohort and assess their ability to recover known causal genes, we ran the **browse unified outliers** notebook (`notebooks/browse_unified_outliers.ipynb`). This analysis consumes the unified outliers table exported by `scripts/export_unified_clinical_outliers.py` and produces recall metrics, volcano plots, gene rank plots, QQ plots, and method summary statistics. The results provide a comprehensive view of which method performs best for clinical anomaly detection and why.
+To systematically compare calibration methods on the clinical cohort and assess their ability to recover known causal genes, we ran the **browse unified outliers** notebook (`notebooks/browse_unified_outliers.ipynb`). This analysis consumes the unified outliers table exported by `scripts/export_unified_clinical_outliers.py` and produces recall metrics, volcano plots, gene rank plots, QQ plots, and method summary statistics. The results provide a comprehensive view of which method performs best for clinical anomaly detection and why. A summary report with dataset statistics, recall tables, and figure references can be generated via `PYTHONPATH=. python scripts/generate_browse_report.py` (output: `reports/bulkformer_dx_unified_outliers_browse_report.md`).
+
+#### Figure Overview: Unified Outliers Browse
+
+All figures are produced by `notebooks/browse_unified_outliers.ipynb` and saved to `reports/figures/unified_outliers_browse/`. The following table provides a concise explanation of each figure type and its role in method comparison.
+
+| Figure | Path | Explanation |
+| :--- | :--- | :--- |
+| **Recall causal** | `recall_causal.png` | Bar chart of recall@K (K=1,5,10,50) and box plot of causal gene rank distribution by method. Answers: *How often is the causal gene in the top K?* NLL achieves best recall@50 (9.26%) and best median rank (4633). |
+| **Volcano plots** | `volcano_{sample_id}.png` | Single-sample: genes on x-axis (z-score) vs y-axis (−log₁₀ p-value). One subplot per method. Genes in upper-right are most anomalous; causal gene highlighted in red. Examples: OM06865 (EPG5), OM23417 (FDXR), OM38813 (TIMMDC1), OM43933 (DNAJC30), OM87369 (NDUFB11), OM91786 (LIG3), OM65708 (ACAD9), OM27390 (MORC2), OM32691 (MT-ND5). |
+| **Gene rank plots** | `gene_ranks_{gene}.png` | Cohort: samples ranked by anomaly for a given gene. x-axis = sample rank, y-axis = z-score. Causal sample highlighted in red. Answers: *Which samples are most anomalous for this gene?* Available for EPG5, FDXR, TIMMDC1, DNAJC30, NDUFB11, LIG3, ACAD9, MORC2, MT-ND5, MRPL38, SSBP1, NFU1. |
+| **QQ all methods** | `qq_all_methods.png` | QQ plot of p-values across all six methods. Points on diagonal = well-calibrated; NB-Outrider shows tightest alignment (KS 0.027). |
+| **QQ per method** | `qq_{method}.png` | Per-method QQ plots (none, student_t, nb_approx, nb_outrider, knn_local, nll) for detailed calibration inspection. |
+| **Variance vs mean** | `variance_vs_mean.png` | Residual variance vs mean expression. Confirms heteroscedasticity (Var ∝ μ + αμ²), justifying NB over Gaussian. |
+| **Stratified histograms** | `stratified_histograms.png` | P-value distributions stratified by expression stratum (low/medium/high). Well-calibrated methods show approximately uniform histograms across strata. |
+| **Observed vs predicted** | `observed_vs_predicted_{gene}.png` | Scatter plot of observed vs predicted expression for causal genes (e.g., EPG5, TIMMDC1). Points on diagonal = good fit; deviations indicate model misfit or true anomalies. |
 
 #### 6.12.1 Overview and Data Source
 
@@ -1253,16 +1268,35 @@ All paths are relative to the repo root. See Section 6.2 for detailed interpreta
 | Absolute BY p | `reports/figures/calibration_absolute_by_p_hist.png` | BY p-value distribution |
 
 ### Unified Outliers Browse
+
+All figures from `notebooks/browse_unified_outliers.ipynb`; see Section 6.12 Figure Overview for explanations.
+
 | Figure | Path | Caption |
 | :--- | :--- | :--- |
 | Recall causal | `reports/figures/unified_outliers_browse/recall_causal.png` | Causal gene recall@K and rank distribution by method |
 | Volcano OM06865 | `reports/figures/unified_outliers_browse/volcano_OM06865.png` | Single-sample volcano (EPG5 causal), sample OM06865 |
-| Volcano OM38813 | `reports/figures/unified_outliers_browse/volcano_OM38813.png` | Single-sample volcano (TIMMDC1 causal), sample OM38813 |
 | Volcano OM23417 | `reports/figures/unified_outliers_browse/volcano_OM23417.png` | Single-sample volcano (FDXR causal), sample OM23417 |
+| Volcano OM38813 | `reports/figures/unified_outliers_browse/volcano_OM38813.png` | Single-sample volcano (TIMMDC1 causal), sample OM38813 |
+| Volcano OM43933 | `reports/figures/unified_outliers_browse/volcano_OM43933.png` | Single-sample volcano (DNAJC30 causal) |
+| Volcano OM87369 | `reports/figures/unified_outliers_browse/volcano_OM87369.png` | Single-sample volcano (NDUFB11 causal) |
+| Volcano OM91786 | `reports/figures/unified_outliers_browse/volcano_OM91786.png` | Single-sample volcano (LIG3 causal) |
+| Volcano OM65708 | `reports/figures/unified_outliers_browse/volcano_OM65708.png` | Single-sample volcano (ACAD9 causal) |
+| Volcano OM27390 | `reports/figures/unified_outliers_browse/volcano_OM27390.png` | Single-sample volcano (MORC2 causal) |
+| Volcano OM32691 | `reports/figures/unified_outliers_browse/volcano_OM32691.png` | Single-sample volcano (MT-ND5 causal) |
 | Gene ranks EPG5 | `reports/figures/unified_outliers_browse/gene_ranks_EPG5.png` | Cohort gene rank plot for EPG5; causal sample highlighted |
-| Gene ranks TIMMDC1 | `reports/figures/unified_outliers_browse/gene_ranks_TIMMDC1.png` | Cohort gene rank plot for TIMMDC1 |
 | Gene ranks FDXR | `reports/figures/unified_outliers_browse/gene_ranks_FDXR.png` | Cohort gene rank plot for FDXR |
+| Gene ranks TIMMDC1 | `reports/figures/unified_outliers_browse/gene_ranks_TIMMDC1.png` | Cohort gene rank plot for TIMMDC1 |
+| Gene ranks DNAJC30 | `reports/figures/unified_outliers_browse/gene_ranks_DNAJC30.png` | Cohort gene rank plot for DNAJC30 |
+| Gene ranks NDUFB11 | `reports/figures/unified_outliers_browse/gene_ranks_NDUFB11.png` | Cohort gene rank plot for NDUFB11 |
+| Gene ranks LIG3 | `reports/figures/unified_outliers_browse/gene_ranks_LIG3.png` | Cohort gene rank plot for LIG3 |
+| Gene ranks ACAD9 | `reports/figures/unified_outliers_browse/gene_ranks_ACAD9.png` | Cohort gene rank plot for ACAD9 |
+| Gene ranks MORC2 | `reports/figures/unified_outliers_browse/gene_ranks_MORC2.png` | Cohort gene rank plot for MORC2 |
+| Gene ranks MT-ND5 | `reports/figures/unified_outliers_browse/gene_ranks_MT-ND5.png` | Cohort gene rank plot for MT-ND5 |
+| Gene ranks MRPL38 | `reports/figures/unified_outliers_browse/gene_ranks_MRPL38.png` | Cohort gene rank plot for MRPL38 |
+| Gene ranks SSBP1 | `reports/figures/unified_outliers_browse/gene_ranks_SSBP1.png` | Cohort gene rank plot for SSBP1 |
+| Gene ranks NFU1 | `reports/figures/unified_outliers_browse/gene_ranks_NFU1.png` | Cohort gene rank plot for NFU1 |
 | QQ all methods | `reports/figures/unified_outliers_browse/qq_all_methods.png` | QQ plot comparing all calibration methods |
+| QQ per method | `reports/figures/unified_outliers_browse/qq_{none,student_t,nb_approx,nb_outrider,knn_local,nll}.png` | Per-method QQ plots |
 | Variance vs mean | `reports/figures/unified_outliers_browse/variance_vs_mean.png` | Residual variance vs mean expression |
 | Stratified histograms | `reports/figures/unified_outliers_browse/stratified_histograms.png` | P-value distributions by expression stratum |
 | Observed vs predicted EPG5 | `reports/figures/unified_outliers_browse/observed_vs_predicted_EPG5.png` | Observed vs predicted expression for EPG5 |
@@ -1322,7 +1356,7 @@ Notebooks: `notebooks/bulkformer_dx_clinical_methods_comparison.ipynb`, `noteboo
 
 **Step 6: Validation (optional)**. Run spike-in injection and recovery metrics to validate pipeline sensitivity. Compare calibration quality (KS, discovery inflation) across methods using the clinical methods comparison notebook.
 
-**Browse unified outliers**. Run `notebooks/browse_unified_outliers.ipynb` after exporting the unified TSV (`scripts/export_unified_clinical_outliers.py`). Produces recall, volcano, gene rank, QQ, and method summary figures in `reports/figures/unified_outliers_browse/`.
+**Browse unified outliers**. Run `notebooks/browse_unified_outliers.ipynb` after exporting the unified TSV (`scripts/export_unified_clinical_outliers.py`). Produces recall, volcano, gene rank, QQ, and method summary figures in `reports/figures/unified_outliers_browse/`. A text summary report with dataset statistics, recall tables, and figure references can be generated via `PYTHONPATH=. python scripts/generate_browse_report.py` (output: `reports/bulkformer_dx_unified_outliers_browse_report.md`). The report depends on the unified TSV and reuses logic from the browse notebook.
 
 ### D.4 Validation Protocol
 
