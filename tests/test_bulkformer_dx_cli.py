@@ -27,8 +27,17 @@ def test_top_level_help_lists_scaffolded_commands() -> None:
     assert result.returncode == 0
     assert "preprocess" in result.stdout
     assert "anomaly" in result.stdout
+    assert "benchmark" in result.stdout
     assert "tissue" in result.stdout
     assert "proteomics" in result.stdout
+
+
+def test_benchmark_help_lists_run_and_grid_run() -> None:
+    result = run_cli("benchmark", "--help")
+
+    assert result.returncode == 0
+    assert "run" in result.stdout
+    assert "grid-run" in result.stdout
 
 
 def test_anomaly_help_lists_scaffolded_subcommands() -> None:
