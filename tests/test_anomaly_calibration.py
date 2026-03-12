@@ -201,3 +201,79 @@ def test_run_writes_calibration_outputs(tmp_path: Path) -> None:
     metadata = json.loads((output_dir / "calibration_run.json").read_text(encoding="utf-8"))
     assert metadata["count_space_method"] == "nb_approx"
     assert metadata["alpha"] == 0.05
+    assert "outlier_validation" in metadata
+    assert "mean_outliers_per_sample" in metadata["outlier_validation"]
+
+
+def test_compute_normalized_outliers_gene_wise_centering() -> None:
+    """Gene-wise centering subtracts cohort median residual before z-score."""
+    result_no_center = calibration.compute_normalized_outliers(
+        observed_log1p_tpm=np.array([[3.0, 7.0]], dtype=float),
+        expected_mu=np.array([[1.0, 7.0]], dtype=float),
+        expected_sigma=np.array([[1.0, 2.0]], dtype=float),
+        gene_names=["ENSG1", "ENSG2"],
+        sample_names=["s1"],
+    )
+    result_with_center = calibration.compute_normalized_outliers(
+        observed_log1p_tpm=np.array([[3.0, 7.0]], dtype=float),
+        expected_mu=np.array([[1.0, 7.0]], dtype=float),
+        expected_sigma=np.array([[1.0, 2.0]], dtype=float),
+        gene_names=["ENSG1", "ENSG2"],
+        sample_names=["s1"],
+        gene_centers={"ENSG1": 1.0, "ENSG2": 0.0},
+    )
+    assert np.isclose(result_no_center.loc[0, "z_score"], 2.0)
+    assert np.isclose(result_with_center.loc[0, "z_score"], 1.0)
+
+
+def test_compute_normalized_outliers_student_t() -> None:
+    """Student-t produces valid p-values (heavier tails than Gaussian)."""
+    result_gauss = calibration.compute_normalized_outliers(
+        observed_log1p_tpm=np.array([[4.0]], dtype=float),
+        expected_mu=np.array([[1.0]], dtype=float),
+        expected_sigma=np.array([[1.0]], dtype=float),
+        gene_names=["G1"],
+        sample_names=["s1"],
+    )
+    result_t = calibration.compute_normalized_outliers(
+        observed_log1p_tpm=np.array([[4.0]], dtype=float),
+        expected_mu=np.array([[1.0]], dtype=float),
+        expected_sigma=np.array([[1.0]], dtype=float),
+        gene_names=["G1"],
+        sample_names=["s1"],
+        use_student_t=True,
+        student_t_df=5.0,
+    )
+    assert 0 <= result_gauss.loc[0, "raw_p_value"] <= 1
+    assert 0 <= result_t.loc[0, "raw_p_value"] <= 1
+    assert result_t.loc[0, "raw_p_value"] > result_gauss.loc[0, "raw_p_value"]
+
+
+def test_calibrate_gene_wise_centering_metadata() -> None:
+    """Calibration run metadata records gene_wise_centering and use_student_t."""
+    ranked = {
+        "a": _make_ranked_table(10.0, 5.0, 1.0),
+        "b": _make_ranked_table(4.0, 2.0, 1.8),
+    }
+    result = calibration.calibrate_ranked_gene_scores(
+        ranked,
+        gene_wise_centering=True,
+        use_student_t=True,
+        student_t_df=5.0,
+    )
+    assert result.run_metadata["gene_wise_centering"] is True
+    assert result.run_metadata["use_student_t"] is True
+    assert result.run_metadata["student_t_df"] == 5.0
+
+
+def test_validate_outlier_counts() -> None:
+    """validate_outlier_counts returns expected keys."""
+    summary = pd.DataFrame({
+        "tested_genes": [100, 100],
+        "absolute_significant_gene_count_by_alpha": [5, 8],
+    })
+    v = calibration.validate_outlier_counts(summary, alpha=0.05)
+    assert "mean_outliers_per_sample" in v
+    assert "median_outliers_per_sample" in v
+    assert "max_outliers_per_sample" in v
+    assert "inflation_ratio" in v

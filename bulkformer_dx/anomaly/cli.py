@@ -249,6 +249,24 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         default=calibration.DEFAULT_ALPHA,
         help="BY-adjusted significance threshold for normalized absolute outlier calls.",
     )
+    calibrate_parser.add_argument(
+        "--no-gene-wise-centering",
+        dest="gene_wise_centering",
+        action="store_false",
+        help="Disable gene-wise residual centering (default: enabled for tighter calibration).",
+    )
+    calibrate_parser.add_argument(
+        "--student-t",
+        dest="use_student_t",
+        action="store_true",
+        help="Use Student-t distribution for p-values instead of Gaussian (heavier tails).",
+    )
+    calibrate_parser.add_argument(
+        "--student-t-df",
+        type=float,
+        default=calibration.DEFAULT_STUDENT_T_DF,
+        help="Degrees of freedom for Student-t when --student-t is used.",
+    )
     calibrate_parser.set_defaults(func=calibration.run)
 
     parser.set_defaults(func=run)

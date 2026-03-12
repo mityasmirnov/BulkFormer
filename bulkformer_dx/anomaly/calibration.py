@@ -10,12 +10,13 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.stats import nbinom, norm
+from scipy.stats import nbinom, norm, t as student_t
 
 SUPPORTED_COUNT_SPACE_METHODS = ("none", "nb_approx")
 DEFAULT_COUNT_SPACE_METHOD = "none"
 DEFAULT_ALPHA = 0.05
 SIGMA_EPSILON = 1e-6
+DEFAULT_STUDENT_T_DF = 5.0
 EMPIRICAL_PVALUE_COLUMN = "empirical_p_value"
 BY_QVALUE_COLUMN = "by_q_value"
 NB_PVALUE_COLUMN = "nb_approx_p_value"
@@ -169,6 +170,9 @@ def compute_normalized_outliers(
     *,
     alpha: float = DEFAULT_ALPHA,
     epsilon: float = SIGMA_EPSILON,
+    gene_centers: dict[str, float] | None = None,
+    use_student_t: bool = False,
+    student_t_df: float = DEFAULT_STUDENT_T_DF,
 ) -> pd.DataFrame:
     """Convert observed/predicted expression into z-scores and BY-adjusted calls.
 
@@ -188,6 +192,14 @@ def compute_normalized_outliers(
         Significance threshold applied after Benjamini-Yekutieli correction.
     epsilon
         Minimum sigma value used for numerical stability.
+    gene_centers
+        Optional cohort median residual per gene. When provided, residuals are
+        centered before z-score computation (gene-wise centering).
+    use_student_t
+        If True, use Student-t distribution for p-values instead of Gaussian.
+        Heavier tails often improve calibration when residuals are non-normal.
+    student_t_df
+        Degrees of freedom for Student-t when use_student_t is True.
 
     Returns
     -------
@@ -199,6 +211,8 @@ def compute_normalized_outliers(
         raise ValueError("alpha must lie in the interval (0, 1).")
     if epsilon <= 0:
         raise ValueError("epsilon must be positive.")
+    if use_student_t and student_t_df <= 0:
+        raise ValueError("student_t_df must be positive when use_student_t is True.")
 
     observed = _to_numpy_2d(observed_log1p_tpm, name="observed_log1p_tpm")
     mu = _to_numpy_2d(expected_mu, name="expected_mu")
@@ -218,8 +232,18 @@ def compute_normalized_outliers(
         )
 
     sigma_safe = np.maximum(sigma, float(epsilon))
-    z_scores = (observed - mu) / sigma_safe
-    raw_p_values = 2.0 * norm.sf(np.abs(z_scores))
+    residuals = observed - mu
+    if gene_centers is not None:
+        center_array = np.array(
+            [gene_centers.get(g, 0.0) for g in gene_names],
+            dtype=float,
+        )
+        residuals = residuals - center_array[np.newaxis, :]
+    z_scores = residuals / sigma_safe
+    if use_student_t:
+        raw_p_values = 2.0 * student_t.sf(np.abs(z_scores), df=student_t_df)
+    else:
+        raw_p_values = 2.0 * norm.sf(np.abs(z_scores))
     by_adjusted = np.vstack(
         [benjamini_yekutieli(raw_p_values[row_idx]) for row_idx in range(sample_count)]
     )
@@ -262,6 +286,41 @@ def _collect_gene_arrays(
     return {
         gene_id: np.asarray(transform(np.asarray(values, dtype=float)), dtype=float)
         for gene_id, values in gene_values.items()
+    }
+
+
+def _format_absolute_outlier_method(
+    *,
+    gene_wise_centering: bool,
+    use_student_t: bool,
+    student_t_df: float,
+) -> str:
+    """Build human-readable description of the absolute outlier method."""
+    parts = ["z=(Y-mu"]
+    if gene_wise_centering:
+        parts[0] += "-center_g"
+    parts[0] += ")/(sigma+eps)"
+    dist = f"Student-t(df={student_t_df})" if use_student_t else "normal"
+    parts.append(f"two-sided {dist} p-values")
+    parts.append("BY correction")
+    return ", ".join(parts)
+
+
+def _compute_gene_wise_residual_centers(
+    ranked_gene_scores: dict[str, pd.DataFrame],
+) -> dict[str, float]:
+    """Compute cohort median residual per gene for gene-wise centering.
+
+    Removes systematic model bias per gene before z-score computation,
+    improving calibration when predictions are systematically off for some genes.
+    """
+    residuals_by_gene = _collect_gene_arrays(
+        ranked_gene_scores,
+        "mean_signed_residual",
+    )
+    return {
+        gene_id: float(np.nanmedian(residuals))
+        for gene_id, residuals in residuals_by_gene.items()
     }
 
 
@@ -361,6 +420,9 @@ def calibrate_ranked_gene_scores(
     *,
     count_space_method: str = DEFAULT_COUNT_SPACE_METHOD,
     alpha: float = DEFAULT_ALPHA,
+    gene_wise_centering: bool = True,
+    use_student_t: bool = False,
+    student_t_df: float = DEFAULT_STUDENT_T_DF,
 ) -> CalibrationResult:
     """Add empirical calibration, normalized outlier calls, and optional NB approximations."""
     if not ranked_gene_scores:
@@ -382,6 +444,11 @@ def calibrate_ranked_gene_scores(
         for sample_id, table in validated_scores.items()
     }
     empirical_sigma_by_gene = _estimate_empirical_sigma_by_gene(validated_scores)
+    gene_centers = (
+        _compute_gene_wise_residual_centers(validated_scores)
+        if gene_wise_centering
+        else None
+    )
     nb_parameters = (
         _estimate_negative_binomial_parameters(validated_scores)
         if count_space_method == "nb_approx"
@@ -427,6 +494,9 @@ def calibrate_ranked_gene_scores(
             calibrated["ensg_id"].astype(str).tolist(),
             [sample_id],
             alpha=alpha,
+            gene_centers=gene_centers,
+            use_student_t=use_student_t,
+            student_t_df=student_t_df,
         )
         absolute_outlier_tables.append(absolute_outliers)
         absolute_columns = absolute_outliers.rename(columns={"gene": "ensg_id"})
@@ -502,9 +572,17 @@ def calibrate_ranked_gene_scores(
         "scored_genes": int(sum(len(table) for table in calibrated_ranked_gene_scores.values())),
         "count_space_method": count_space_method,
         "empirical_method": "cohort upper-tail fraction over anomaly_score",
-        "absolute_outlier_method": "z=(Y-mu)/(sigma+eps), two-sided normal p-values, BY correction",
+        "absolute_outlier_method": _format_absolute_outlier_method(
+            gene_wise_centering=gene_wise_centering,
+            use_student_t=use_student_t,
+            student_t_df=student_t_df,
+        ),
         "alpha": alpha,
+        "gene_wise_centering": gene_wise_centering,
+        "use_student_t": use_student_t,
     }
+    if use_student_t:
+        run_metadata["student_t_df"] = student_t_df
     if count_space_method == "nb_approx":
         run_metadata["count_space_note"] = (
             "Negative-binomial values are a TPM-derived approximation for ranking support only; "
@@ -516,6 +594,49 @@ def calibrate_ranked_gene_scores(
         calibration_summary=calibration_summary,
         run_metadata=run_metadata,
     )
+
+
+def validate_outlier_counts(
+    calibration_summary: pd.DataFrame,
+    *,
+    alpha: float = DEFAULT_ALPHA,
+    tested_genes_col: str = "tested_genes",
+    absolute_outliers_col: str = "absolute_significant_gene_count_by_alpha",
+) -> dict[str, Any]:
+    """Validate that outlier counts per sample are plausible.
+
+    Returns summary statistics for downstream checks. Under the null, expected
+    significant genes per sample is alpha * tested_genes; heavy inflation may
+    indicate calibration issues.
+
+    Returns
+    -------
+    dict
+        Keys: mean_outliers, median_outliers, max_outliers, expected_under_null,
+        inflation_ratio (mean / expected).
+    """
+    if absolute_outliers_col not in calibration_summary.columns:
+        return {}
+    outliers = calibration_summary[absolute_outliers_col]
+    tested = (
+        calibration_summary[tested_genes_col]
+        if tested_genes_col in calibration_summary.columns
+        else None
+    )
+    expected = (
+        float(alpha * tested.mean())
+        if tested is not None and tested.size > 0
+        else None
+    )
+    result: dict[str, Any] = {
+        "mean_outliers_per_sample": float(outliers.mean()),
+        "median_outliers_per_sample": float(outliers.median()),
+        "max_outliers_per_sample": int(outliers.max()),
+    }
+    if expected is not None and expected > 0:
+        result["expected_under_null"] = expected
+        result["inflation_ratio"] = float(outliers.mean() / expected)
+    return result
 
 
 def write_calibration_outputs(result: CalibrationResult, output_dir: Path) -> None:
@@ -536,13 +657,25 @@ def write_calibration_outputs(result: CalibrationResult, output_dir: Path) -> No
 def run(args: argparse.Namespace) -> int:
     """Calibrate ranked anomaly scores across the cohort."""
     ranked_gene_scores = load_ranked_gene_scores(Path(args.scores))
+    alpha = getattr(args, "alpha", DEFAULT_ALPHA)
     result = calibrate_ranked_gene_scores(
         ranked_gene_scores,
         count_space_method=args.count_space_method,
-        alpha=getattr(args, "alpha", DEFAULT_ALPHA),
+        alpha=alpha,
+        gene_wise_centering=getattr(args, "gene_wise_centering", True),
+        use_student_t=getattr(args, "use_student_t", False),
+        student_t_df=getattr(args, "student_t_df", DEFAULT_STUDENT_T_DF),
     )
+    validation = validate_outlier_counts(
+        result.calibration_summary,
+        alpha=alpha,
+    )
+    if validation:
+        result.run_metadata["outlier_validation"] = validation
+
     output_dir = Path(args.output_dir)
     write_calibration_outputs(result, output_dir)
+
     print(f"Wrote calibrated anomaly outputs to {output_dir}")
     print(
         "Samples: {samples} | scored genes: {genes} | method: {method}".format(
@@ -551,4 +684,14 @@ def run(args: argparse.Namespace) -> int:
             method=result.run_metadata["count_space_method"],
         )
     )
+    if validation:
+        print(
+            "Outlier counts: mean={mean:.1f} | median={median:.0f} | max={max} | "
+            "inflation={infl:.2f}x".format(
+                mean=validation["mean_outliers_per_sample"],
+                median=validation["median_outliers_per_sample"],
+                max=validation["max_outliers_per_sample"],
+                infl=validation.get("inflation_ratio", float("nan")),
+            )
+        )
     return 0

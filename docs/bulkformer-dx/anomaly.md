@@ -62,20 +62,29 @@ multiple-testing-aware ranking.
 In addition to the existing empirical residual ranking, calibration now emits an explicit normalized
 absolute-outlier table using:
 
-`z = (Y - mu) / (sigma + 1e-6)`
+`z = (Y - mu - center_g) / (sigma + 1e-6)`
 
 where:
 
 - `Y` is the observed `log1p(TPM)`
 - `mu` is the BulkFormer expected expression (`mean_predicted_expression`)
-- `sigma` is the cohort-derived robust residual scale for the current implementation
+- `center_g` is the cohort median residual per gene (gene-wise centering, enabled by default)
+- `sigma` is the cohort-derived robust residual scale (MAD-based)
+
+Gene-wise centering removes systematic model bias per gene before z-score computation, improving
+calibration when predictions are systematically off for some genes. Use `--no-gene-wise-centering`
+to disable.
 
 Two-sided p-values are computed as:
 
-`p = 2 * norm.sf(abs(z))`
+`p = 2 * dist.sf(abs(z))`
 
-and then adjusted within each sample using Benjamini-Yekutieli, which is the default because gene
-expression measurements are correlated.
+where `dist` is either the standard normal (default) or Student-t with configurable degrees of
+freedom (`--student-t --student-t-df 5`). Student-t has heavier tails and often improves
+calibration when residuals are non-normal.
+
+P-values are adjusted within each sample using Benjamini-Yekutieli, which is the default because
+gene expression measurements are correlated.
 
 Inputs:
 
@@ -85,6 +94,9 @@ Inputs:
   empirical. `nb_approx` adds a TPM-derived negative-binomial approximation and is explicitly
   labeled as approximate rather than raw-count inference.
 - `--alpha`: significance threshold applied to the BY-adjusted normalized absolute-outlier calls.
+- `--no-gene-wise-centering`: disable gene-wise residual centering (default: enabled).
+- `--student-t`: use Student-t distribution for p-values instead of Gaussian.
+- `--student-t-df`: degrees of freedom for Student-t (default: 5).
 
 Outputs:
 
@@ -95,7 +107,9 @@ Outputs:
   carried through the BulkFormer-aligned matrix.
 - `calibration_summary.tsv`: per-sample summary including minimum empirical/BY values and the count
   of BY-significant genes, plus normalized absolute-outlier significance counts.
-- `calibration_run.json`: run metadata plus an approximation note when `nb_approx` is enabled.
+- `calibration_run.json`: run metadata, outlier validation stats (mean/median/max outliers per
+  sample, inflation ratio vs null expectation), plus an approximation note when `nb_approx` is
+  enabled.
 
 Example:
 
