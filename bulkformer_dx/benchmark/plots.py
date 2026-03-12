@@ -124,3 +124,97 @@ def build_preprocess_sanity_table(
             "expected_count_mapping": mapping_term,
         })
     return pd.DataFrame(rows)
+
+
+def plot_pr_curve(
+    ground_truth: np.ndarray,
+    score: np.ndarray,
+    output_path: Path,
+) -> Path | None:
+    """Plot precision-recall curve. Higher score = more anomalous.
+
+    Returns output_path if successful, None if matplotlib unavailable.
+    """
+    try:
+        import matplotlib.pyplot as plt
+        from sklearn.metrics import precision_recall_curve
+    except ImportError:
+        return None
+    ground_truth = np.asarray(ground_truth, dtype=bool).ravel()
+    score = np.asarray(score, dtype=float).ravel()
+    if ground_truth.sum() == 0:
+        return None
+    precision, recall, _ = precision_recall_curve(ground_truth, score)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.plot(recall, precision)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title("Precision-Recall Curve")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
+def plot_pvalue_histogram(
+    p_values: np.ndarray,
+    output_path: Path,
+) -> Path | None:
+    """Plot histogram of p-values (expect ~uniform under null)."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    p_values = np.asarray(p_values, dtype=float).ravel()
+    p_values = p_values[np.isfinite(p_values) & (p_values >= 0) & (p_values <= 1)]
+    if p_values.size < 2:
+        return None
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(p_values, bins=20, edgecolor="black", alpha=0.7)
+    ax.axhline(p_values.size / 20, color="red", linestyle="--", label="Expected (uniform)")
+    ax.set_xlabel("p-value")
+    ax.set_ylabel("Count")
+    ax.set_title("P-value Distribution")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
+def plot_pvalue_qq(
+    p_values: np.ndarray,
+    output_path: Path,
+) -> Path | None:
+    """QQ plot of p-values vs Uniform(0,1)."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    p_values = np.asarray(p_values, dtype=float).ravel()
+    p_values = np.sort(p_values[np.isfinite(p_values) & (p_values >= 0) & (p_values <= 1)])
+    if p_values.size < 2:
+        return None
+    n = len(p_values)
+    theoretical = np.linspace(0, 1, n + 2)[1:-1]
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.scatter(theoretical, p_values, alpha=0.5, s=5)
+    ax.plot([0, 1], [0, 1], "r--", label="Uniform(0,1)")
+    ax.set_xlabel("Theoretical quantile")
+    ax.set_ylabel("Sample quantile")
+    ax.set_title("P-value QQ Plot")
+    ax.legend()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path

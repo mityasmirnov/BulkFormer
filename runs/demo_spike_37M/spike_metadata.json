@@ -1,31 +1,421 @@
 {
-  "target_samples": [
-    "sample_1",
-    "sample_2"
+  "preprocess_dir": "/home/smirnov/projects/BulkFormer/runs/demo_preprocess_37M",
+  "n_inject": 40,
+  "scale": 3.0,
+  "direction": "both",
+  "seed": 0,
+  "n_samples": 100,
+  "n_genes": 20010,
+  "injected_sample_idx": [
+    84,
+    48,
+    55,
+    54,
+    76,
+    8,
+    1,
+    86,
+    72,
+    26,
+    4,
+    64,
+    2,
+    17,
+    51,
+    97,
+    7,
+    3,
+    8,
+    42,
+    60,
+    85,
+    72,
+    81,
+    39,
+    27,
+    55,
+    50,
+    91,
+    67,
+    93,
+    17,
+    81,
+    54,
+    0,
+    29,
+    30,
+    85,
+    63,
+    63
   ],
-  "target_genes": [
-    "ENSG00000000003",
-    "ENSG00000000005",
-    "ENSG00000000419",
-    "ENSG00000000457",
-    "ENSG00000000460",
-    "ENSG00000000938",
-    "ENSG00000000971",
-    "ENSG00000001036",
-    "ENSG00000001084",
-    "ENSG00000001167",
-    "ENSG00000001460",
-    "ENSG00000001461",
-    "ENSG00000001497",
-    "ENSG00000001561",
-    "ENSG00000001617",
-    "ENSG00000001626",
-    "ENSG00000001629",
-    "ENSG00000001630",
-    "ENSG00000001631",
-    "ENSG00000002016"
+  "injected_gene_idx": [
+    13149,
+    2123,
+    19833,
+    2921,
+    9776,
+    799,
+    13061,
+    6355,
+    19313,
+    19573,
+    1946,
+    18822,
+    4205,
+    11315,
+    2255,
+    1462,
+    10483,
+    7174,
+    18582,
+    5377,
+    13262,
+    14803,
+    18985,
+    6519,
+    8296,
+    14696,
+    8626,
+    7243,
+    5488,
+    1742,
+    10131,
+    10534,
+    11698,
+    7241,
+    5479,
+    19432,
+    15655,
+    1215,
+    13906,
+    4529
   ],
-  "spike_delta": 3.0,
-  "input_path": "runs/demo_preprocess_37M/aligned_log1p_tpm.tsv",
-  "spiked_path": "runs/demo_spike_37M/aligned_log1p_tpm_spiked.tsv"
+  "directions": [
+    "over",
+    "under",
+    "over",
+    "under",
+    "under",
+    "over",
+    "under",
+    "over",
+    "under",
+    "over",
+    "over",
+    "under",
+    "over",
+    "under",
+    "under",
+    "under",
+    "under",
+    "over",
+    "under",
+    "under",
+    "under",
+    "under",
+    "under",
+    "over",
+    "under",
+    "over",
+    "under",
+    "over",
+    "under",
+    "under",
+    "over",
+    "over",
+    "under",
+    "over",
+    "under",
+    "under",
+    "over",
+    "over",
+    "over",
+    "under"
+  ],
+  "injected_pairs": [
+    {
+      "sample_id": "sample_85",
+      "gene_id": "ENSG00000172987",
+      "sample_idx": 84,
+      "gene_idx": 13149,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_49",
+      "gene_id": "ENSG00000099954",
+      "sample_idx": 48,
+      "gene_idx": 2123,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_56",
+      "gene_id": "ENSG00000285943",
+      "sample_idx": 55,
+      "gene_idx": 19833,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_55",
+      "gene_id": "ENSG00000104687",
+      "sample_idx": 54,
+      "gene_idx": 2921,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_77",
+      "gene_id": "ENSG00000156006",
+      "sample_idx": 76,
+      "gene_idx": 9776,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_9",
+      "gene_id": "ENSG00000059758",
+      "sample_idx": 8,
+      "gene_idx": 799,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_2",
+      "gene_id": "ENSG00000172531",
+      "sample_idx": 1,
+      "gene_idx": 13061,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_87",
+      "gene_id": "ENSG00000131435",
+      "sample_idx": 86,
+      "gene_idx": 6355,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_73",
+      "gene_id": "ENSG00000273331",
+      "sample_idx": 72,
+      "gene_idx": 19313,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_27",
+      "gene_id": "ENSG00000280969",
+      "sample_idx": 26,
+      "gene_idx": 19573,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_5",
+      "gene_id": "ENSG00000092098",
+      "sample_idx": 4,
+      "gene_idx": 1946,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_65",
+      "gene_id": "ENSG00000258366",
+      "sample_idx": 64,
+      "gene_idx": 18822,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_3",
+      "gene_id": "ENSG00000114019",
+      "sample_idx": 2,
+      "gene_idx": 4205,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_18",
+      "gene_id": "ENSG00000165059",
+      "sample_idx": 17,
+      "gene_idx": 11315,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_52",
+      "gene_id": "ENSG00000100348",
+      "sample_idx": 51,
+      "gene_idx": 2255,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_98",
+      "gene_id": "ENSG00000079616",
+      "sample_idx": 97,
+      "gene_idx": 1462,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_8",
+      "gene_id": "ENSG00000161940",
+      "sample_idx": 7,
+      "gene_idx": 10483,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_4",
+      "gene_id": "ENSG00000136487",
+      "sample_idx": 3,
+      "gene_idx": 7174,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_9",
+      "gene_id": "ENSG00000251380",
+      "sample_idx": 8,
+      "gene_idx": 18582,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_43",
+      "gene_id": "ENSG00000123999",
+      "sample_idx": 42,
+      "gene_idx": 5377,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_61",
+      "gene_id": "ENSG00000173585",
+      "sample_idx": 60,
+      "gene_idx": 13262,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_86",
+      "gene_id": "ENSG00000183155",
+      "sample_idx": 85,
+      "gene_idx": 14803,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_73",
+      "gene_id": "ENSG00000262461",
+      "sample_idx": 72,
+      "gene_idx": 18985,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_82",
+      "gene_id": "ENSG00000132591",
+      "sample_idx": 81,
+      "gene_idx": 6519,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_40",
+      "gene_id": "ENSG00000143512",
+      "sample_idx": 39,
+      "gene_idx": 8296,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_28",
+      "gene_id": "ENSG00000182621",
+      "sample_idx": 27,
+      "gene_idx": 14696,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_56",
+      "gene_id": "ENSG00000145808",
+      "sample_idx": 55,
+      "gene_idx": 8626,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_51",
+      "gene_id": "ENSG00000136861",
+      "sample_idx": 50,
+      "gene_idx": 7243,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_92",
+      "gene_id": "ENSG00000124596",
+      "sample_idx": 91,
+      "gene_idx": 5488,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_68",
+      "gene_id": "ENSG00000087842",
+      "sample_idx": 67,
+      "gene_idx": 1742,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_94",
+      "gene_id": "ENSG00000159063",
+      "sample_idx": 93,
+      "gene_idx": 10131,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_18",
+      "gene_id": "ENSG00000162344",
+      "sample_idx": 17,
+      "gene_idx": 10534,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_82",
+      "gene_id": "ENSG00000166598",
+      "sample_idx": 81,
+      "gene_idx": 11698,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_55",
+      "gene_id": "ENSG00000136856",
+      "sample_idx": 54,
+      "gene_idx": 7241,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_1",
+      "gene_id": "ENSG00000124564",
+      "sample_idx": 0,
+      "gene_idx": 5479,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_30",
+      "gene_id": "ENSG00000276231",
+      "sample_idx": 29,
+      "gene_idx": 19432,
+      "direction": "under"
+    },
+    {
+      "sample_id": "sample_31",
+      "gene_id": "ENSG00000187187",
+      "sample_idx": 30,
+      "gene_idx": 15655,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_86",
+      "gene_id": "ENSG00000073169",
+      "sample_idx": 85,
+      "gene_idx": 1215,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_64",
+      "gene_id": "ENSG00000177483",
+      "sample_idx": 63,
+      "gene_idx": 13906,
+      "direction": "over"
+    },
+    {
+      "sample_id": "sample_64",
+      "gene_id": "ENSG00000116459",
+      "sample_idx": 63,
+      "gene_idx": 4529,
+      "direction": "under"
+    }
+  ],
+  "ground_truth_mask_shape": [
+    100,
+    20010
+  ]
 }

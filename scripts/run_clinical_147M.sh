@@ -17,7 +17,7 @@ python -m bulkformer_dx.cli anomaly score \
   --valid-gene-mask "${PREPROCESS_DIR}/valid_gene_mask.tsv" \
   --output-dir "runs/clinical_anomaly_score_${VARIANT}" \
   --variant "${VARIANT}" \
-  --device cpu \
+  --device cuda \
   --batch-size 4 \
   --mc-passes 8 \
   --mask-prob 0.15
@@ -34,10 +34,13 @@ python -m bulkformer_dx.cli embeddings extract \
   --valid-gene-mask "${PREPROCESS_DIR}/valid_gene_mask.tsv" \
   --output-dir "runs/clinical_embeddings_${VARIANT}" \
   --variant "${VARIANT}" \
-  --device cpu \
+  --device cuda \
   --batch-size 4
 
 # 4. Merge annotation
 python scripts/merge_clinical_annotation.py --variant "${VARIANT}"
 
-echo "=== Done. Outputs in runs/clinical_*_${VARIANT}/ ==="
+# 5. Generate report
+PYTHONPATH=. python scripts/generate_clinical_report.py --variant 147M
+
+echo "=== Done. Outputs in runs/clinical_*_${VARIANT}/ Report: reports/bulkformer_dx_clinical_report_147M.md ==="

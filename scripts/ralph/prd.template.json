@@ -172,6 +172,56 @@
       "priority": 13,
       "passes": false,
       "notes": "Anomaly plan step 8."
+    },
+    {
+      "id": "demo-pipeline",
+      "title": "Demo pipeline with spike inject and benchmark",
+      "description": "Run demo preprocess, spike inject, anomaly score, calibrate; produce demo report with benchmarking.",
+      "acceptanceCriteria": [
+        "scripts/demo_spike_inject.py creates runs/demo_spike_37M/",
+        "scripts/spike_recovery_metrics.py produces spike_recovery.tsv and anomaly_qc_summary.json",
+        "scripts/run_demo_37M.sh runs end-to-end",
+        "reports/bulkformer_dx_demo_report.md includes AUROC, AUPRC, recall@FDR"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "BulkFormer DX benchmark reports plan."
+    },
+    {
+      "id": "clinical-37m-pipeline",
+      "title": "Clinical 37M pipeline",
+      "description": "Run clinical preprocess, anomaly score, calibrate (37M); produce clinical report.",
+      "acceptanceCriteria": [
+        "scripts/run_clinical_37M.sh runs end-to-end",
+        "reports/bulkformer_dx_clinical_report.md generated"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "BulkFormer DX benchmark reports plan."
+    },
+    {
+      "id": "clinical-147m-pipeline",
+      "title": "Clinical 147M pipeline",
+      "description": "Run anomaly score, calibrate, embeddings (147M); produce 147M report.",
+      "acceptanceCriteria": [
+        "scripts/run_clinical_147M.sh runs end-to-end",
+        "reports/bulkformer_dx_clinical_report_147M.md generated"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "BulkFormer DX benchmark reports plan."
+    },
+    {
+      "id": "notebooks-reproduce",
+      "title": "Notebooks reproduce pipeline",
+      "description": "Notebooks run without errors and reproduce reports.",
+      "acceptanceCriteria": [
+        "notebooks/bulkformer_dx_demo_37M.ipynb executes top-to-bottom",
+        "notebooks/bulkformer_dx_clinical_37M_147M.ipynb executes top-to-bottom"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "BulkFormer DX benchmark reports plan."
     }
   ]
 }

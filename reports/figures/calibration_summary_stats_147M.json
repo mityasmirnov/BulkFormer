@@ -2,7 +2,7 @@
   "variant": "147M",
   "alpha": 0.01,
   "samples": 146,
-  "mean_absolute_outliers_per_sample": 5649.897260273972,
-  "median_absolute_outliers_per_sample": 5596.5,
+  "mean_absolute_outliers_per_sample": 39.58904109589041,
+  "median_absolute_outliers_per_sample": 20.5,
   "mean_empirical_005_per_sample": 0.0
 }
