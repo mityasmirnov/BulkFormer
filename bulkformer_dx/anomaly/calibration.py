@@ -108,16 +108,22 @@ def _validate_ranked_gene_table(table: pd.DataFrame, *, sample_id: str) -> pd.Da
         )
     resolved = table.copy()
     resolved["ensg_id"] = resolved["ensg_id"].astype(str)
-    if not resolved["ensg_id"].is_unique:
-        raise ValueError(f"Ranked gene table for sample {sample_id!r} contains duplicate genes.")
     numeric_columns = sorted(REQUIRED_RANKED_COLUMNS - {"ensg_id"})
     for column in numeric_columns:
-        resolved[column] = pd.to_numeric(resolved[column], errors="raise")
-        if not np.isfinite(resolved[column]).all():
-            raise ValueError(
-                f"Ranked gene table for sample {sample_id!r} contains non-finite values "
-                f"in required column {column!r}."
-            )
+        resolved[column] = pd.to_numeric(resolved[column], errors="coerce")
+    # Drop rows with non-finite required numeric values (NLL can produce inf/nan for edge cases)
+    finite_mask = np.ones(len(resolved), dtype=bool)
+    for column in numeric_columns:
+        finite_mask &= np.isfinite(resolved[column])
+    n_dropped = (~finite_mask).sum()
+    if n_dropped > 0:
+        resolved = resolved.loc[finite_mask].copy()
+    if not resolved["ensg_id"].is_unique:
+        raise ValueError(f"Ranked gene table for sample {sample_id!r} contains duplicate genes.")
+    if len(resolved) == 0:
+        raise ValueError(
+            f"Ranked gene table for sample {sample_id!r} has no rows with finite anomaly_score."
+        )
     return resolved
 
 
