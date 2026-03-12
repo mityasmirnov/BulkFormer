@@ -9,6 +9,7 @@ Reports document preprocessing, anomaly scoring, calibration, and benchmark metr
 | `bulkformer_dx_demo_report.md` | Demo pipeline (37M): preprocess, spike inject, anomaly score, calibrate, benchmark metrics |
 | `bulkformer_dx_clinical_report.md` | Clinical pipeline (37M): preprocess, anomaly score, calibrate, embeddings |
 | `bulkformer_dx_clinical_report_147M.md` | Clinical pipeline (147M): anomaly score, calibrate (alpha=0.01), embeddings |
+| `HARMONIZED_REPORT_TEMPLATE.md` | Canonical section order and tables for demo/clinical/method-comparison reporting |
 
 ## Benchmarking Fields
 
@@ -50,3 +51,7 @@ PYTHONPATH=. python scripts/generate_clinical_report.py --variant both
 - `notebooks/bulkformer_dx_clinical_37M_147M.ipynb` – Reproduces clinical pipeline
 
 Run notebooks from repo root with `PYTHONPATH=.` so `bulkformer_dx` is importable.
+
+## Harmonized reporting format
+
+Use `reports/HARMONIZED_REPORT_TEMPLATE.md` as the default structure for new reports so metrics, methods, and caveats are comparable across runs.
