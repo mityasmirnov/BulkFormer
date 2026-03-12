@@ -13,3 +13,6 @@ data/*.pt
 data/demo/
 data/clinical_rnaseq/
 notebooks/
+
+# Large docs
+docs/*.pdf
