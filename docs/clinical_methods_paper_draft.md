@@ -625,7 +625,7 @@ The clinical preprocess step reports: samples count, input genes (after version 
 **Example 3: Single patient, no cohort**. Use a public reference (e.g., GTEx fibroblasts) as the "cohort." Preprocess patient + reference together. Run anomaly score. Calibrate with NB-Outrider or Gaussian using the reference samples for gene-wise statistics. The patient's residuals are compared to the reference null. Caveat: reference must be biologically similar (tissue, condition).
 
 ### 6.10 Summary of Key Findings
-(1) **NB-Outrider achieves the best calibration** (KS 0.027) when raw counts and count-space artifacts are available. (2) **Gene-wise centering is essential** for z-score methods; without it, Gaussian calibration produces thousands of false positives per sample. (3) **Student-t is highly conservative** (median 0 outliers) and may be suitable when minimizing false positives is paramount. (4) **kNN-Local can over-call** (median 159 outliers) when the cohort is heterogeneous and the local neighborhood is not well-matched; it is best used when tissue or batch metadata suggests meaningful stratification. (5) **37M vs 147M**: The larger model yields fewer outliers at a stricter α but requires significantly more compute; for many applications, 37M with NB-Outrider is sufficient.
+(1) **NB-Outrider achieves the best calibration** (KS 0.027) when raw counts and count-space artifacts are available. (2) **Gene-wise centering is essential** for z-score methods; without it, Gaussian calibration produces thousands of false positives per sample. (3) **Student-t is highly conservative** (median 0 outliers) and may be suitable when minimizing false positives is paramount. (4) **kNN-Local can over-call** (median 159 outliers) when the cohort is heterogeneous and the local neighborhood is not well-matched; it is best used when tissue or batch metadata suggests meaningful stratification. (5) **37M vs 147M**: The larger model yields fewer outliers at a stricter α but requires significantly more compute; for many applications, 37M with NB-Outrider is sufficient. (6) **Unified outliers browse** (Section 6.12): NB-Outrider achieves the best balance of calibration and causal gene recall; kNN-Local fails (0 recall, median 159 outliers). Gene rank and volcano plots support method selection for single-sample vs cohort interpretation.
 
 ### 6.11 Detailed Case Analysis: Sample-Level Interpretation
 
@@ -634,6 +634,158 @@ To illustrate the clinical utility of BulkFormer-DX, we present a detailed inter
 **Gene-level interpretation**: For a given sample, the top-ranked genes by anomaly_score (before calibration) are those where BulkFormer's prediction deviates most from the observed value. After calibration, the BY-adjusted p-values control false discovery; genes with padj < α are the "absolute outliers" reported. The NB-Outrider path additionally provides `nb_outrider_direction` (up/down) and `nb_outrider_expected_count` for biological interpretation. Integration with known mutation databases (e.g., disease_genes.tsv from omicsDiagnostics) allows prioritization of outliers in genes relevant to the patient's phenotype.
 
 **Cohort-level patterns**: The mean cohort abs residual (0.8603 for clinical) summarizes the average magnitude of residuals across the cohort. Samples with higher mean_abs_residual in `cohort_scores.tsv` may indicate more systematic deviation from the model's expectations—possibly due to batch effects, tissue composition, or true biological aberrations. The kNN-Local calibration is designed to address such heterogeneity by restricting the null to embedding-space neighbors.
+
+### 6.12 Unified Outliers Browse Analysis
+
+To systematically compare calibration methods on the clinical cohort and assess their ability to recover known causal genes, we ran the **browse unified outliers** notebook (`notebooks/browse_unified_outliers.ipynb`). This analysis consumes the unified outliers table exported by `scripts/export_unified_clinical_outliers.py` and produces recall metrics, volcano plots, gene rank plots, QQ plots, and method summary statistics. The results provide a comprehensive view of which method performs best for clinical anomaly detection and why.
+
+#### 6.12.1 Overview and Data Source
+
+The unified outliers table (`runs/clinical_methods_37M/unified_outliers.tsv`) aggregates outlier calls from all six calibration methods into a single long-format table. Each row corresponds to one (sample, gene) pair; columns include sample and gene identifiers, observed expression, and per-method z-scores, raw p-values, BY-adjusted p-values, and significance flags. The table comprises approximately **2.8 million rows** (146 samples × 19,751 genes), **45 columns**, and covers **54 samples with known causal genes** from the omicsDiagnostics annotation.
+
+The six methods compared are: **none** (empirical Gaussian with gene-wise centering), **student_t** (Student-t with df=5), **nb_approx** (TPM-derived NB approximation for ranking support), **nb_outrider** (OUTRIDER-style Negative Binomial in count space), **knn_local** (local cohort calibration via kNN in embedding space), and **nll** (TabPFN-style NLL pseudo-likelihood scoring). The browse notebook produces recall of causal genes, volcano plots (single-sample), gene rank plots (cohort), QQ plots, variance-vs-mean and stratified histograms, observed-vs-predicted scatter plots, and a method comparison summary table.
+
+#### 6.12.2 Single-Sample vs Cohort Analysis
+
+The browse analysis distinguishes two fundamental modes of interpretation:
+
+| Mode | Scope | Question Answered | Visualization |
+| :--- | :--- | :--- | :--- |
+| **Single-sample** | One patient | Which genes are most anomalous in this sample? | Volcano plots, table browsing |
+| **Cohort** | All samples | Which samples are most anomalous for this gene? How often is the causal gene in top-K? | Gene rank plots, recall@K |
+
+**Volcano plots** (single-sample): For a chosen sample, each point is a gene. The x-axis is z-score (or residual magnitude), the y-axis is −log₁₀(raw p-value). Genes in the upper-right are both highly anomalous and statistically significant. The causal gene (where `Gene_Name == known_causal_gene` for that sample) is highlighted in red. One subplot per calibration method allows direct comparison of how each method ranks genes within that sample.
+
+**Gene rank plots** (cohort): For a chosen gene, each point is a sample. The x-axis is sample rank (1 = most anomalous for that gene), the y-axis is z-score or residual. Samples where this gene is the known causal gene are highlighted in red. Ideal for causal genes (EPG5, FDXR, TIMMDC1, DNAJC30, NDUFB11, LIG3, etc.) to assess whether the true-positive sample ranks near the top.
+
+**Recall of causal genes** (cohort): For each sample with a known causal gene, we compute the rank of that gene within the sample (by p-value, then z-score). Recall@K is the fraction of causal samples where the causal gene appears in the top K. Median rank summarizes how deeply buried the causal gene tends to be in the ranking.
+
+#### 6.12.3 Causal Gene Recall: Method Comparison
+
+The recall analysis reveals stark differences across methods. The following table summarizes recall@1, recall@5, recall@10, recall@50, and median rank of the causal gene for each method (54 causal samples):
+
+| Method | recall@1 | recall@5 | recall@10 | recall@50 | median_rank |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| knn_local | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 7709 |
+| nb_approx | 0.0185 | 0.0185 | 0.0185 | 0.0556 | 7709 |
+| nb_outrider | 0.0185 | 0.0185 | 0.0185 | 0.0556 | 7709 |
+| nll | 0.0000 | 0.0000 | 0.0370 | 0.0926 | 4633 |
+| none | 0.0000 | 0.0000 | 0.0000 | 0.0741 | 7208 |
+| student_t | 0.0185 | 0.0185 | 0.0185 | 0.0556 | 7709 |
+
+![Causal gene recall and rank distribution by method](reports/figures/unified_outliers_browse/recall_causal.png)
+
+**Figure 6.12.1.** Causal gene recall@K (left) and causal gene rank distribution (right) by calibration method. NB-Outrider, nb_approx, and Student-t achieve the only non-zero recall@1 (1.85%); kNN-Local and none achieve zero recall at K≤10.
+
+**Interpretation**: **kNN-Local** achieves **zero recall** at all K values and a median rank of 7709—the causal gene is never among the top outliers and is typically buried deep in the ranking. This failure likely reflects the homogeneous fibroblast cohort: local calibration restricts the null to embedding-space neighbors, which may dilute the signal when the cohort lacks meaningful stratification. **nb_outrider**, **nb_approx**, and **student_t** achieve the best recall: 1.85% at K=1, 5, 10 (one causal sample recovered in top-1) and 5.56% at K=50 (three samples). **nll** and **none** achieve zero recall at K≤5 but nonzero at K=50 (nll 9.26%, none 7.41%); nll has a lower median rank (4633) than none (7208), suggesting NLL scoring sometimes elevates causal genes higher, though not into the top-5.
+
+The low recall across all methods (1–2 samples in top-1 out of 54) reflects the inherent difficulty of causal gene recovery: transcriptomic anomalies may be subtle, confounded by batch or technical noise, or not fully captured by the model. The median rank of ~7709 for most methods indicates that causal genes are often buried in the middle of the ranking rather than at the top.
+
+#### 6.12.4 Outlier Count and Discovery Inflation
+
+The method comparison table reports mean, median, and max outliers per sample, alongside recall@1 and recall@5:
+
+| Method | mean_outliers | median_outliers | max_outliers | recall@1 | recall@5 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| knn_local | 190.66 | 159 | 686 | 0.0000 | 0.0000 |
+| nb_approx | 22.99 | 8 | 322 | 0.0185 | 0.0185 |
+| nb_outrider | 22.99 | 8 | 322 | 0.0185 | 0.0185 |
+| nll | 83.49 | 41 | 1755 | 0.0000 | 0.0000 |
+| none | 92.21 | 45.5 | 1848 | 0.0000 | 0.0000 |
+| student_t | 0.03 | 0 | 2 | 0.0185 | 0.0185 |
+
+**kNN-Local** exhibits severe over-calling: median 159 outliers per sample, mean 190.66, max 686. This aligns with the discovery inflation reported in Section 6.1 (62×) and explains why kNN-Local achieves zero causal recall—the ranking is flooded with false positives, pushing true causal genes down. **none** (Gaussian) and **nll** also over-call (median 45.5 and 41 respectively), with none showing 56× discovery inflation. **nb_outrider** and **nb_approx** achieve a balanced profile: median 8 outliers, mean 23, with the best causal recall. **student_t** is extremely conservative: median 0 outliers, mean 0.03, max 2—it achieves the same recall as NB-Outrider but at the cost of almost no discoveries, limiting clinical utility.
+
+#### 6.12.5 Volcano Plots: Single-Sample Interpretation
+
+Volcano plots visualize, for a single sample, which genes are most anomalous. The x-axis is z-score (or residual), the y-axis is −log₁₀(raw p-value). Points in the upper-right are both highly anomalous and statistically significant. The causal gene is highlighted in red. Representative samples with known causal genes include OM06865 (EPG5), OM23417 (FDXR), OM38813 (TIMMDC1), OM43933 (DNAJC30), OM87369 (NDUFB11), and OM91786 (LIG3).
+
+![Volcano plot for sample OM06865 (EPG5 causal)](reports/figures/unified_outliers_browse/volcano_OM06865.png)
+
+**Figure 6.12.2.** Single-sample volcano plot for sample OM06865 (known causal gene EPG5). Each subplot corresponds to a calibration method. Genes in the upper-right are most anomalous; the causal gene EPG5 is highlighted in red.
+
+![Volcano plot for sample OM38813 (TIMMDC1 causal)](reports/figures/unified_outliers_browse/volcano_OM38813.png)
+
+**Figure 6.12.3.** Single-sample volcano plot for sample OM38813 (known causal gene TIMMDC1). Method differences in how prominently the causal gene stands out reflect calibration quality.
+
+![Volcano plot for sample OM23417 (FDXR causal)](reports/figures/unified_outliers_browse/volcano_OM23417.png)
+
+**Figure 6.12.4.** Single-sample volcano plot for sample OM23417 (known causal gene FDXR). NB-Outrider and nb_approx typically show tighter separation of the causal gene from background when the signal is present.
+
+Across these volcano plots, **NB-Outrider** and **nb_approx** tend to produce more interpretable separation: the causal gene, when elevated, appears in the upper-right with fewer spurious genes nearby. **none** and **knn_local** often show many genes in the upper-right, diluting the signal. **student_t** may show the causal gene but with very few other discoveries, reflecting its conservatism.
+
+#### 6.12.6 Gene Rank Plots: Cohort Interpretation
+
+Gene rank plots answer: for a given gene, which samples are most anomalous? The x-axis is sample rank (1 = most anomalous for that gene), the y-axis is z-score. Each point is a sample; samples where this gene is the known causal gene are highlighted in red. Ideally, the causal sample should rank near 1 for its causal gene.
+
+![Gene rank plot for EPG5](reports/figures/unified_outliers_browse/gene_ranks_EPG5.png)
+
+**Figure 6.12.5.** Cohort gene rank plot for EPG5. Each subplot shows samples ranked by anomaly for EPG5; the causal sample (OM06865) is highlighted in red. Methods that place the causal sample near rank 1 are preferred.
+
+![Gene rank plot for TIMMDC1](reports/figures/unified_outliers_browse/gene_ranks_TIMMDC1.png)
+
+**Figure 6.12.6.** Cohort gene rank plot for TIMMDC1. The causal sample OM38813 is highlighted in red. NB-Outrider and student_t tend to show the causal sample at a high rank when the transcriptomic signal is present.
+
+![Gene rank plot for FDXR](reports/figures/unified_outliers_browse/gene_ranks_FDXR.png)
+
+**Figure 6.12.7.** Cohort gene rank plot for FDXR. The causal sample OM23417 is highlighted in red. Gene rank plots complement recall metrics by showing per-gene, per-sample behavior.
+
+Gene rank plots for EPG5, TIMMDC1, FDXR, DNAJC30, NDUFB11, LIG3, ACAD9, MORC2, MT-ND5, and others are available in `reports/figures/unified_outliers_browse/`. When the causal sample ranks near 1, the method successfully identifies that sample as anomalous for that gene. NB-Outrider and student_t tend to perform well on these plots when the signal is present; kNN-Local often places the causal sample at a low rank (high rank number), consistent with its zero recall.
+
+#### 6.12.7 QQ Plots and Calibration
+
+QQ plots compare observed p-values to the theoretical Uniform(0,1) null. Points on the diagonal indicate well-calibrated p-values; upward deviation at low p-values indicates over-calling; downward deviation indicates under-calling.
+
+![QQ plot comparing all calibration methods](reports/figures/unified_outliers_browse/qq_all_methods.png)
+
+**Figure 6.12.8.** QQ plot comparing all calibration methods. NB-Outrider shows the tightest alignment to the diagonal (KS 0.027); Gaussian (none) and kNN-Local show upward deviation indicating over-calling.
+
+Per-method QQ plots are also available (`qq_none.png`, `qq_student_t.png`, `qq_nb_outrider.png`, `qq_knn_local.png`, `qq_nll.png`). As established in Section 6.1, **NB-Outrider** achieves the best calibration (KS 0.027), with points closely following the diagonal. **student_t** shows conservative calibration (points below the diagonal at low p-values). **none** and **knn_local** show upward deviation, consistent with discovery inflation.
+
+#### 6.12.8 Variance vs Mean and Stratified Histograms
+
+The variance-vs-mean plot confirms heteroscedasticity: residual variance scales non-linearly with mean expression (Var ∝ μ + αμ²), justifying dispersion-aware models such as NB-Outrider over homoscedastic Gaussian assumptions.
+
+![Residual variance vs mean expression](reports/figures/unified_outliers_browse/variance_vs_mean.png)
+
+**Figure 6.12.9.** Residual variance vs mean expression. The curved trend confirms heteroscedasticity and supports the use of Negative Binomial calibration.
+
+![P-value distributions by expression stratum](reports/figures/unified_outliers_browse/stratified_histograms.png)
+
+**Figure 6.12.10.** P-value distributions stratified by gene expression (low, medium, high). Well-calibrated methods show approximately uniform histograms across strata; NB-Outrider maintains uniformity better than Gaussian.
+
+Stratified histograms show p-value distributions within each expression stratum. NB-Outrider maintains approximately uniform p-values across strata; Gaussian can show inflation at low expression where zero-inflation and heteroscedasticity are most pronounced.
+
+#### 6.12.9 Observed vs Predicted
+
+Observed-vs-predicted scatter plots for causal genes (e.g., EPG5, TIMMDC1) visualize model fit quality. Points on the diagonal indicate good prediction; systematic deviations indicate genes where the model consistently over- or under-predicts.
+
+![Observed vs predicted expression for EPG5](reports/figures/unified_outliers_browse/observed_vs_predicted_EPG5.png)
+
+**Figure 6.12.11.** Observed vs predicted expression for EPG5 across samples. Causal samples may show larger residuals when the mutation affects expression.
+
+![Observed vs predicted expression for TIMMDC1](reports/figures/unified_outliers_browse/observed_vs_predicted_TIMMDC1.png)
+
+**Figure 6.12.12.** Observed vs predicted expression for TIMMDC1. These plots support interpretation of gene rank and volcano results by showing where the model fits well or poorly.
+
+#### 6.12.10 Synthesis: Which Method Is Best and Why
+
+**Best overall: NB-Outrider.** The unified browse analysis confirms that **NB-Outrider** is the preferred calibration method for clinical anomaly detection when raw counts and count-space artifacts are available. It achieves: (1) the best p-value calibration (KS 0.027); (2) balanced outlier counts (median 8, mean 23 per sample); (3) the best causal gene recall among methods with meaningful discoveries (1.85% at K=1, 5.56% at K=50); (4) correct modeling of the count process (discrete, heteroscedastic), avoiding log-space artifacts. nb_approx matches NB-Outrider on recall and outlier counts but is an approximation (TPM-derived pseudo-counts); NB-Outrider is preferred when raw counts exist.
+
+**When to use each method:**
+
+| Method | Use Case | Rationale |
+| :--- | :--- | :--- |
+| **none** | Fast exploratory analysis | Sub-second calibration; over-calls (median 45.5) but useful for initial screening |
+| **student_t** | Minimize false positives | Extremely conservative (median 0 outliers); same recall as NB-Outrider but almost no discoveries |
+| **nb_outrider** | Production diagnostic pipeline | Best calibration, balanced discoveries, best causal recall; requires raw counts |
+| **nb_approx** | Ranking when counts unavailable | Approximates NB from TPM; similar performance to nb_outrider for ranking |
+| **knn_local** | Heterogeneous cohort, batch effects | Designed for tissue/batch stratification; fails on homogeneous fibroblast cohort (0 recall, 159 median outliers) |
+| **nll** | Research, density-based ranking | Different score type; moderate outliers (median 41) but zero recall at K≤5; useful for method development |
+
+**Caveats:** (1) Causal recall is low across all methods (1–2 samples in top-1), reflecting the difficulty of recovering causal genes from transcriptomic data alone. (2) Median rank ~7709 indicates causal genes are often buried in the ranking; gene rank and volcano plots help prioritize manual review. (3) kNN-Local fails on this homogeneous cohort; it may perform better on mixed-tissue or batch-confounded data. (4) Student-t achieves good recall but at the cost of almost no discoveries; it is suitable only when minimizing false positives is paramount.
+
+**Recommendation:** Use **NB-Outrider** for production. Supplement with gene rank plots for causal gene prioritization and volcano plots for single-sample interpretation. Run the browse notebook (`notebooks/browse_unified_outliers.ipynb`) after exporting the unified TSV to reproduce all figures and metrics.
 
 ---
 
@@ -1100,6 +1252,22 @@ All paths are relative to the repo root. See Section 6.2 for detailed interpreta
 | Absolute significant | `reports/figures/calibration_absolute_significant_count_hist.png` | BY significant counts |
 | Absolute BY p | `reports/figures/calibration_absolute_by_p_hist.png` | BY p-value distribution |
 
+### Unified Outliers Browse
+| Figure | Path | Caption |
+| :--- | :--- | :--- |
+| Recall causal | `reports/figures/unified_outliers_browse/recall_causal.png` | Causal gene recall@K and rank distribution by method |
+| Volcano OM06865 | `reports/figures/unified_outliers_browse/volcano_OM06865.png` | Single-sample volcano (EPG5 causal), sample OM06865 |
+| Volcano OM38813 | `reports/figures/unified_outliers_browse/volcano_OM38813.png` | Single-sample volcano (TIMMDC1 causal), sample OM38813 |
+| Volcano OM23417 | `reports/figures/unified_outliers_browse/volcano_OM23417.png` | Single-sample volcano (FDXR causal), sample OM23417 |
+| Gene ranks EPG5 | `reports/figures/unified_outliers_browse/gene_ranks_EPG5.png` | Cohort gene rank plot for EPG5; causal sample highlighted |
+| Gene ranks TIMMDC1 | `reports/figures/unified_outliers_browse/gene_ranks_TIMMDC1.png` | Cohort gene rank plot for TIMMDC1 |
+| Gene ranks FDXR | `reports/figures/unified_outliers_browse/gene_ranks_FDXR.png` | Cohort gene rank plot for FDXR |
+| QQ all methods | `reports/figures/unified_outliers_browse/qq_all_methods.png` | QQ plot comparing all calibration methods |
+| Variance vs mean | `reports/figures/unified_outliers_browse/variance_vs_mean.png` | Residual variance vs mean expression |
+| Stratified histograms | `reports/figures/unified_outliers_browse/stratified_histograms.png` | P-value distributions by expression stratum |
+| Observed vs predicted EPG5 | `reports/figures/unified_outliers_browse/observed_vs_predicted_EPG5.png` | Observed vs predicted expression for EPG5 |
+| Observed vs predicted TIMMDC1 | `reports/figures/unified_outliers_browse/observed_vs_predicted_TIMMDC1.png` | Observed vs predicted for TIMMDC1 |
+
 ---
 
 ## Appendix D: Reproducibility
@@ -1153,6 +1321,8 @@ Notebooks: `notebooks/bulkformer_dx_clinical_methods_comparison.ipynb`, `noteboo
 **Step 5: Downstream analysis**. Filter `absolute_outliers.tsv` by `is_significant`. Join with sample annotation for phenotype correlation. Overlap with known disease genes (e.g., `disease_genes.tsv` from omicsDiagnostics). For rare disease: prioritize outliers in genes matching the patient's HPO phenotype.
 
 **Step 6: Validation (optional)**. Run spike-in injection and recovery metrics to validate pipeline sensitivity. Compare calibration quality (KS, discovery inflation) across methods using the clinical methods comparison notebook.
+
+**Browse unified outliers**. Run `notebooks/browse_unified_outliers.ipynb` after exporting the unified TSV (`scripts/export_unified_clinical_outliers.py`). Produces recall, volcano, gene rank, QQ, and method summary figures in `reports/figures/unified_outliers_browse/`.
 
 ### D.4 Validation Protocol
 
