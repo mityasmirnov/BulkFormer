@@ -245,15 +245,7 @@ def build_bulkformer_graph(
     *,
     device: str | torch.device = "cpu",
 ) -> Any:
-    """Build the graph object expected by `utils.BulkFormer.BulkFormer`."""
-    try:
-        from torch_geometric.typing import SparseTensor
-    except ImportError as exc:
-        raise ImportError(
-            "Loading the BulkFormer graph requires `torch_geometric`. "
-            "See `docs/installation.md` for the recommended wheel install commands."
-        ) from exc
-
+    """Build the sparse graph object expected by `utils.BulkFormer.BulkFormer`."""
     graph_object = torch.load(Path(graph_path), map_location="cpu", weights_only=False)
     weights = torch.load(Path(graph_weights_path), map_location="cpu", weights_only=False)
     row, col = _extract_graph_rows_and_cols(graph_object)
@@ -262,11 +254,13 @@ def build_bulkformer_graph(
     resolved_device = torch.device(device)
 
     try:
+        from torch_geometric.typing import SparseTensor
+
         return SparseTensor(row=row, col=col, value=weights).t().to(resolved_device)
-    except ImportError:
-        edge_index = torch.stack((col, row), dim=0).to(device=resolved_device)
-        edge_weight = weights.to(device=resolved_device)
-        return edge_index, edge_weight
+    except (ImportError, Exception):
+        edge_index = torch.stack([col, row], dim=0).long().to(resolved_device)
+        edge_weight = weights.to(resolved_device)
+        return (edge_index, edge_weight)
 
 
 def _load_gene_embeddings(gene_embedding_path: str | Path) -> torch.Tensor:

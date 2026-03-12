@@ -27,7 +27,6 @@ class BulkFormer_block(nn.Module):
         self.layernorm = nn.LayerNorm(self.dim)
 
     def forward(self, x, graph):
- 
         # === 图卷积 ===
         x = self.layernorm(x)
         if isinstance(graph, tuple):

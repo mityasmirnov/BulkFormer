@@ -25,7 +25,7 @@ All four workflows are now implemented with unit tests and working CLIs:
 - `cli-reference.md`: top-level CLI inventory and output contracts
 - `preprocess.md`: counts normalization and alignment details
 - `anomaly.md`: scoring, small heads, and calibration
-- `tissue.md`: tissue training and prediction
+- `tissue.md`: tissue training and prediction - tbd
 - `proteomics.md`: RNA-to-proteomics prediction and protein outlier ranking
 
 See the workflow docs in this directory for end-to-end command examples.
