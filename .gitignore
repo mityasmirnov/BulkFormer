@@ -10,6 +10,11 @@ env/
 runs/
 model/*.pt
 data/*.pt
+data/*.csv
+data/*.pkl
+data/*.h5ad
+data/*.zip
+data/*.txt
 data/demo/
 data/clinical_rnaseq/
 notebooks/
