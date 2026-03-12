@@ -148,3 +148,43 @@ def test_mc_predict_with_loaded_model() -> None:
 
     assert pred_bundle.y_hat.shape == (2, 6)
     assert mc_samples.shape == (2, 2, 6)
+
+
+def test_mc_predict_populates_sigma_hat_when_multiple_passes() -> None:
+    """mc_predict sets sigma_hat from mc_variance when mc_passes > 1."""
+    bundle = _make_bundle(n_samples=2, n_genes=6)
+    model = _DummyBulkFormer()
+    loaded = _LoadedModel(model=model, device=torch.device("cpu"))
+
+    pred_bundle, mc_samples = mc_predict(
+        bundle,
+        loaded_model=loaded,
+        mc_passes=4,
+        mask_prob=0.3,
+        seed=0,
+        batch_size=2,
+    )
+
+    assert pred_bundle.sigma_hat is not None
+    assert pred_bundle.sigma_hat.shape == (2, 6)
+    np.testing.assert_array_less(0, pred_bundle.sigma_hat)
+
+
+def test_predict_dispatches_by_method_config() -> None:
+    """Unified predict() uses mc_predict when mc_passes > 0, else predict_mean."""
+    from bulkformer_dx.io.schemas import MethodConfig
+    from bulkformer_dx.model.bulkformer import predict
+
+    bundle = _make_bundle(n_samples=2, n_genes=6)
+    model = _DummyBulkFormer()
+    loaded = _LoadedModel(model=model, device=torch.device("cpu"))
+
+    config_mean = MethodConfig(method_id="mean", space="log1p_tpm", mc_passes=0)
+    pred_mean = predict(bundle, config_mean, loaded_model=loaded, batch_size=2)
+    assert pred_mean.sigma_hat is None
+    assert pred_mean.mc_samples is None
+
+    config_mc = MethodConfig(method_id="mc", space="log1p_tpm", mc_passes=2, seed=0)
+    pred_mc = predict(bundle, config_mc, loaded_model=loaded, batch_size=2)
+    assert pred_mc.sigma_hat is not None
+    assert pred_mc.mc_samples is not None

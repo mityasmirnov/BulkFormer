@@ -7,6 +7,7 @@ Reports document preprocessing, benchmarking, and anomaly detection steps.
 | Report | Step | Description |
 |--------|------|-------------|
 | `step_two_preprocess_counts.md` | 2 | Preprocess QC: aligned counts, TPM, gene lengths, sample scaling, sanity table |
+| `step_three_nb_outrider_test.md` | 3 | OUTRIDER-style NB test: expected-count mapping, dispersion, p-value formula, calibration wiring |
 
 ## Generating Reports
 

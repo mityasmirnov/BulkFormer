@@ -129,6 +129,18 @@ def test_calibrate_ranked_gene_scores_requires_multiple_samples() -> None:
         calibration.calibrate_ranked_gene_scores({"sample_a": _make_ranked_table(10.0, 5.0, 1.0)})
 
 
+def test_calibrate_nb_outrider_requires_count_space_path() -> None:
+    ranked_gene_scores = {
+        "sample_a": _make_ranked_table(10.0, 5.0, 1.0),
+        "sample_b": _make_ranked_table(4.0, 2.0, 1.8),
+    }
+    with pytest.raises(ValueError, match="nb_outrider requires count_space_path"):
+        calibration.calibrate_ranked_gene_scores(
+            ranked_gene_scores,
+            count_space_method="nb_outrider",
+        )
+
+
 def test_calibrate_ranked_gene_scores_rejects_non_finite_values() -> None:
     ranked_gene_scores = {
         "sample_a": _make_ranked_table(10.0, 5.0, 1.0),

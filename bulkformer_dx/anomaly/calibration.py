@@ -12,7 +12,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import nbinom, norm, t as student_t
 
-SUPPORTED_COUNT_SPACE_METHODS = ("none", "nb_approx")
+from bulkformer_dx.calibration.multitest import benjamini_yekutieli
+from bulkformer_dx.calibration.pvalues import empirical_tail_pvalue
+
+SUPPORTED_COUNT_SPACE_METHODS = ("none", "nb_approx", "nb_outrider")
 DEFAULT_COUNT_SPACE_METHOD = "none"
 DEFAULT_ALPHA = 0.05
 SIGMA_EPSILON = 1e-6
@@ -21,6 +24,8 @@ EMPIRICAL_PVALUE_COLUMN = "empirical_p_value"
 BY_QVALUE_COLUMN = "by_q_value"
 NB_PVALUE_COLUMN = "nb_approx_p_value"
 NB_TWO_SIDED_PVALUE_COLUMN = "nb_approx_two_sided_p_value"
+NB_OUTRIDER_PVALUE_COLUMN = "nb_outrider_p_raw"
+NB_OUTRIDER_PADJ_COLUMN = "nb_outrider_p_adj"
 EXPECTED_MU_COLUMN = "expected_mu"
 EXPECTED_SIGMA_COLUMN = "expected_sigma"
 Z_SCORE_COLUMN = "z_score"
@@ -116,6 +121,58 @@ def _validate_ranked_gene_table(table: pd.DataFrame, *, sample_id: str) -> pd.Da
     return resolved
 
 
+def load_embeddings_from_scores_dir(
+    scores_path: Path,
+) -> tuple[np.ndarray, list[str]] | None:
+    """Load sample embeddings from a scoring output directory if present.
+
+    Looks for embeddings.npy and cohort_scores.tsv to establish sample order.
+    Returns (embeddings, sample_ids) or None if not available.
+    """
+    base = scores_path if scores_path.is_dir() and scores_path.name != "ranked_genes" else scores_path.parent
+    emb_path = base / "embeddings.npy"
+    cohort_path = base / "cohort_scores.tsv"
+    if not emb_path.exists() or not cohort_path.exists():
+        return None
+    try:
+        embeddings = np.load(emb_path, allow_pickle=False)
+        cohort = _read_table(cohort_path)
+        sample_col = "sample_id" if "sample_id" in cohort.columns else str(cohort.columns[0])
+        sample_ids = cohort[sample_col].astype(str).tolist()
+        if embeddings.shape[0] != len(sample_ids):
+            return None
+        return np.asarray(embeddings, dtype=float), sample_ids
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def load_embeddings_from_path(
+    path: Path,
+    sample_ids: list[str],
+) -> np.ndarray | None:
+    """Load embeddings from a file path.
+
+    Supports .npy (shape n_samples x d) and .npz with 'embeddings' key.
+    Sample order must match sample_ids.
+    """
+    if not path.exists():
+        return None
+    try:
+        if path.suffix.lower() == ".npy":
+            arr = np.load(path, allow_pickle=False)
+        elif path.suffix.lower() == ".npz":
+            data = np.load(path, allow_pickle=False)
+            arr = data["embeddings"] if "embeddings" in data else data[list(data.keys())[0]]
+        else:
+            return None
+        arr = np.asarray(arr, dtype=float)
+        if arr.ndim != 2 or arr.shape[0] != len(sample_ids):
+            return None
+        return arr
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def load_ranked_gene_scores(scores_path: Path) -> dict[str, pd.DataFrame]:
     """Load per-sample ranked anomaly scores from a scoring output directory."""
     ranked_dir = _resolve_ranked_dir(scores_path)
@@ -131,34 +188,6 @@ def load_ranked_gene_scores(scores_path: Path) -> dict[str, pd.DataFrame]:
     if not ranked_gene_scores:
         raise ValueError(f"No ranked gene score files were found in {ranked_dir}.")
     return ranked_gene_scores
-
-
-def benjamini_yekutieli(p_values: np.ndarray | list[float]) -> np.ndarray:
-    """Apply Benjamini-Yekutieli FDR correction."""
-    resolved = np.asarray(p_values, dtype=float)
-    if resolved.ndim != 1:
-        raise ValueError("Benjamini-Yekutieli correction expects a 1D array of p-values.")
-    if resolved.size == 0:
-        return resolved.copy()
-    finite_mask = np.isfinite(resolved)
-    if np.any((resolved[finite_mask] < 0.0) | (resolved[finite_mask] > 1.0)):
-        raise ValueError("P-values must lie in the interval [0, 1].")
-
-    adjusted = np.full(resolved.shape, np.nan, dtype=float)
-    finite_values = resolved[finite_mask]
-    if finite_values.size == 0:
-        return adjusted
-
-    order = np.argsort(finite_values, kind="mergesort")
-    ranked = finite_values[order]
-    ranks = np.arange(1, ranked.size + 1, dtype=float)
-    harmonic = float(np.sum(1.0 / ranks))
-    raw = ranked * ranked.size * harmonic / ranks
-    monotone = np.minimum.accumulate(raw[::-1])[::-1]
-    reordered = np.empty_like(monotone)
-    reordered[order] = np.clip(monotone, 0.0, 1.0)
-    adjusted[finite_mask] = reordered
-    return adjusted
 
 
 def compute_normalized_outliers(
@@ -308,65 +337,98 @@ def _format_absolute_outlier_method(
 
 def _compute_gene_wise_residual_centers(
     ranked_gene_scores: dict[str, pd.DataFrame],
-) -> dict[str, float]:
+    *,
+    cohort_indices: dict[str, list[int]] | None = None,
+    sample_id_list: list[str] | None = None,
+) -> dict[str, float] | dict[str, dict[str, float]]:
     """Compute cohort median residual per gene for gene-wise centering.
 
-    Removes systematic model bias per gene before z-score computation,
-    improving calibration when predictions are systematically off for some genes.
+    If cohort_indices is provided, returns per-sample: sample_id -> gene_id -> center.
+    Otherwise returns global: gene_id -> center.
+    """
+    sample_ids = sample_id_list or list(ranked_gene_scores.keys())
+
+    if cohort_indices is None:
+        residuals_by_gene = _collect_gene_arrays(
+            ranked_gene_scores,
+            "mean_signed_residual",
+        )
+        return {
+            gene_id: float(np.nanmedian(residuals))
+            for gene_id, residuals in residuals_by_gene.items()
+        }
+
+    centers_by_sample: dict[str, dict[str, float]] = {}
+    for target_id, neighbor_indices in cohort_indices.items():
+        neighbor_ids = [sample_ids[j] for j in neighbor_indices if j < len(sample_ids)]
+        sub_scores = {sid: ranked_gene_scores[sid] for sid in neighbor_ids if sid in ranked_gene_scores}
+        if len(sub_scores) < 2:
+            sub_scores = ranked_gene_scores
+        sub_residuals = _collect_gene_arrays(sub_scores, "mean_signed_residual")
+        centers_by_sample[target_id] = {
+            gene_id: float(np.nanmedian(residuals))
+            for gene_id, residuals in sub_residuals.items()
+        }
+    return centers_by_sample
+
+
+def _estimate_empirical_sigma_by_gene(
+    ranked_gene_scores: dict[str, pd.DataFrame],
+    *,
+    cohort_indices: dict[str, list[int]] | None = None,
+    sample_id_list: list[str] | None = None,
+) -> dict[str, float] | dict[str, dict[str, float]]:
+    """Estimate a robust residual scale per gene across the cohort.
+
+    If cohort_indices is provided, returns per-sample sigma: sample_id -> gene_id -> sigma.
+    Otherwise returns global sigma: gene_id -> sigma.
     """
     residuals_by_gene = _collect_gene_arrays(
         ranked_gene_scores,
         "mean_signed_residual",
     )
-    return {
-        gene_id: float(np.nanmedian(residuals))
-        for gene_id, residuals in residuals_by_gene.items()
-    }
+    sample_ids = sample_id_list or list(ranked_gene_scores.keys())
 
+    if cohort_indices is None:
+        sigma_by_gene: dict[str, float] = {}
+        for gene_id, residuals in residuals_by_gene.items():
+            center = float(np.nanmedian(residuals))
+            mad = float(np.nanmedian(np.abs(residuals - center)))
+            sigma = 1.4826 * mad
+            if not np.isfinite(sigma) or sigma <= SIGMA_EPSILON:
+                ddof = 1 if residuals.size > 1 else 0
+                sigma = float(np.nanstd(residuals, ddof=ddof))
+            if not np.isfinite(sigma) or sigma <= SIGMA_EPSILON:
+                sigma = SIGMA_EPSILON
+            sigma_by_gene[gene_id] = sigma
+        return sigma_by_gene
 
-def _estimate_empirical_sigma_by_gene(
-    ranked_gene_scores: dict[str, pd.DataFrame],
-) -> dict[str, float]:
-    """Estimate a robust residual scale per gene across the cohort."""
-    residuals_by_gene = _collect_gene_arrays(
-        ranked_gene_scores,
-        "mean_signed_residual",
-    )
-    sigma_by_gene: dict[str, float] = {}
-    for gene_id, residuals in residuals_by_gene.items():
-        center = float(np.nanmedian(residuals))
-        mad = float(np.nanmedian(np.abs(residuals - center)))
-        sigma = 1.4826 * mad
-        if not np.isfinite(sigma) or sigma <= SIGMA_EPSILON:
-            ddof = 1 if residuals.size > 1 else 0
-            sigma = float(np.nanstd(residuals, ddof=ddof))
-        if not np.isfinite(sigma) or sigma <= SIGMA_EPSILON:
-            sigma = SIGMA_EPSILON
-        sigma_by_gene[gene_id] = sigma
-    return sigma_by_gene
+    sample_id_to_idx = {s: i for i, s in enumerate(sample_ids)}
+    sigma_by_sample_gene: dict[str, dict[str, float]] = {}
+    for target_id, neighbor_indices in cohort_indices.items():
+        neighbor_ids = [sample_ids[j] for j in neighbor_indices if j < len(sample_ids)]
+        sub_scores = {sid: ranked_gene_scores[sid] for sid in neighbor_ids if sid in ranked_gene_scores}
+        if len(sub_scores) < 2:
+            sub_scores = ranked_gene_scores
+        sub_residuals = _collect_gene_arrays(sub_scores, "mean_signed_residual")
+        sigma_by_gene: dict[str, float] = {}
+        for gene_id, residuals in sub_residuals.items():
+            center = float(np.nanmedian(residuals))
+            mad = float(np.nanmedian(np.abs(residuals - center)))
+            sigma = 1.4826 * mad
+            if not np.isfinite(sigma) or sigma <= SIGMA_EPSILON:
+                ddof = 1 if residuals.size > 1 else 0
+                sigma = float(np.nanstd(residuals, ddof=ddof))
+            if not np.isfinite(sigma) or sigma <= SIGMA_EPSILON:
+                sigma = SIGMA_EPSILON
+            sigma_by_gene[gene_id] = sigma
+        sigma_by_sample_gene[target_id] = sigma_by_gene
+    return sigma_by_sample_gene
 
 
 def _expression_to_tpm(values: np.ndarray) -> np.ndarray:
     tpm = np.expm1(np.asarray(values, dtype=float))
     return np.clip(tpm, a_min=0.0, a_max=None)
-
-
-def _leave_one_out_empirical_p_value(
-    *,
-    distribution: np.ndarray,
-    observed_value: float,
-) -> float:
-    """Estimate an upper-tail empirical p-value against the cohort background.
-
-    The current sample should not be part of its own reference distribution; this helper
-    applies a +1 pseudo-count so finite p-values remain available even for small cohorts.
-    """
-    finite_distribution = np.asarray(distribution, dtype=float)
-    finite_distribution = finite_distribution[np.isfinite(finite_distribution)]
-    if finite_distribution.size == 0:
-        raise ValueError("Empirical calibration requires at least one finite cohort score.")
-    exceedances = float(np.count_nonzero(finite_distribution >= observed_value))
-    return (exceedances + 1.0) / (finite_distribution.size + 1.0)
 
 
 def _estimate_negative_binomial_parameters(
@@ -419,10 +481,15 @@ def calibrate_ranked_gene_scores(
     ranked_gene_scores: dict[str, pd.DataFrame],
     *,
     count_space_method: str = DEFAULT_COUNT_SPACE_METHOD,
+    count_space_path: Path | None = None,
+    nb_cache_dir: Path | None = None,
     alpha: float = DEFAULT_ALPHA,
     gene_wise_centering: bool = True,
     use_student_t: bool = False,
     student_t_df: float = DEFAULT_STUDENT_T_DF,
+    cohort_mode: str = "global",
+    knn_k: int = 50,
+    embeddings: np.ndarray | None = None,
 ) -> CalibrationResult:
     """Add empirical calibration, normalized outlier calls, and optional NB approximations."""
     if not ranked_gene_scores:
@@ -430,8 +497,15 @@ def calibrate_ranked_gene_scores(
     if count_space_method not in SUPPORTED_COUNT_SPACE_METHODS:
         supported = ", ".join(SUPPORTED_COUNT_SPACE_METHODS)
         raise ValueError(f"Unsupported count-space method {count_space_method!r}. Use one of: {supported}.")
+    if count_space_method == "nb_outrider" and (count_space_path is None or not count_space_path.exists()):
+        raise ValueError(
+            "nb_outrider requires count_space_path pointing to preprocess output "
+            "(aligned_counts.tsv, gene_lengths_aligned.tsv, sample_scaling.tsv)."
+        )
     if not 0 < alpha < 1:
         raise ValueError("alpha must lie in the interval (0, 1).")
+    if cohort_mode not in ("global", "knn_local"):
+        raise ValueError(f"cohort_mode must be 'global' or 'knn_local', got {cohort_mode!r}.")
 
     validated_scores = {
         sample_id: _validate_ranked_gene_table(table, sample_id=sample_id)
@@ -443,9 +517,27 @@ def calibrate_ranked_gene_scores(
         sample_id: dict(zip(table["ensg_id"].astype(str), table["anomaly_score"], strict=True))
         for sample_id, table in validated_scores.items()
     }
-    empirical_sigma_by_gene = _estimate_empirical_sigma_by_gene(validated_scores)
-    gene_centers = (
-        _compute_gene_wise_residual_centers(validated_scores)
+    sample_id_list = list(validated_scores.keys())
+    cohort_indices = None
+    if cohort_mode == "knn_local" and embeddings is not None:
+        from bulkformer_dx.calibration.cohort import get_cohort_indices
+        cohort_indices = get_cohort_indices(
+            sample_id_list,
+            cohort_mode=cohort_mode,
+            embedding=embeddings,
+            knn_k=min(knn_k, len(sample_id_list) - 1),
+        )
+    sigma_result = _estimate_empirical_sigma_by_gene(
+        validated_scores,
+        cohort_indices=cohort_indices,
+        sample_id_list=sample_id_list,
+    )
+    centers_result = (
+        _compute_gene_wise_residual_centers(
+            validated_scores,
+            cohort_indices=cohort_indices,
+            sample_id_list=sample_id_list,
+        )
         if gene_wise_centering
         else None
     )
@@ -454,6 +546,16 @@ def calibrate_ranked_gene_scores(
         if count_space_method == "nb_approx"
         else {}
     )
+    nb_outrider_tables: dict[str, pd.DataFrame] = {}
+    if count_space_method == "nb_outrider" and count_space_path is not None:
+        from bulkformer_dx.anomaly.nb_test import compute_nb_outrider_for_calibration
+
+        nb_outrider_tables = compute_nb_outrider_for_calibration(
+            validated_scores,
+            count_space_path,
+            cache_dir=nb_cache_dir,
+            multiple_testing="BY",
+        )
 
     calibrated_ranked_gene_scores: dict[str, pd.DataFrame] = {}
     absolute_outlier_tables: list[pd.DataFrame] = []
@@ -462,8 +564,8 @@ def calibrate_ranked_gene_scores(
         calibrated = table.copy()
         empirical_p_values = np.array(
             [
-                _leave_one_out_empirical_p_value(
-                    distribution=np.array(
+                empirical_tail_pvalue(
+                    np.array(
                         [
                             score_by_gene[str(gene_id)]
                             for other_sample_id, score_by_gene in anomaly_score_lookup.items()
@@ -471,7 +573,8 @@ def calibrate_ranked_gene_scores(
                         ],
                         dtype=float,
                     ),
-                    observed_value=float(anomaly_score),
+                    float(anomaly_score),
+                    upper_tail=True,
                 )
                 for gene_id, anomaly_score in zip(
                     calibrated["ensg_id"],
@@ -483,10 +586,23 @@ def calibrate_ranked_gene_scores(
         )
         calibrated[EMPIRICAL_PVALUE_COLUMN] = empirical_p_values
         calibrated[BY_QVALUE_COLUMN] = benjamini_yekutieli(empirical_p_values)
-        expected_sigma = np.array(
-            [empirical_sigma_by_gene[str(gene_id)] for gene_id in calibrated["ensg_id"]],
-            dtype=float,
-        )
+        if isinstance(sigma_result, dict) and sample_id in sigma_result:
+            sig_map = sigma_result[sample_id]
+            expected_sigma = np.array(
+                [sig_map.get(str(gene_id), SIGMA_EPSILON) for gene_id in calibrated["ensg_id"]],
+                dtype=float,
+            )
+        else:
+            expected_sigma = np.array(
+                [sigma_result.get(str(gene_id), SIGMA_EPSILON) for gene_id in calibrated["ensg_id"]],
+                dtype=float,
+            )
+        gene_centers = None
+        if centers_result is not None:
+            if isinstance(centers_result, dict) and sample_id in centers_result:
+                gene_centers = centers_result[sample_id]
+            else:
+                gene_centers = centers_result
         absolute_outliers = compute_normalized_outliers(
             calibrated["observed_expression"].to_numpy(dtype=float, copy=True),
             calibrated["mean_predicted_expression"].to_numpy(dtype=float, copy=True),
@@ -530,6 +646,12 @@ def calibrate_ranked_gene_scores(
             calibrated[NB_PVALUE_COLUMN] = np.asarray(nb_one_sided, dtype=float)
             calibrated[NB_TWO_SIDED_PVALUE_COLUMN] = np.asarray(nb_two_sided, dtype=float)
 
+        if count_space_method == "nb_outrider" and sample_id in nb_outrider_tables:
+            nb_table = nb_outrider_tables[sample_id]
+            for col in ("nb_outrider_p_raw", "nb_outrider_p_adj", "nb_outrider_direction", "nb_outrider_expected_count"):
+                if col in nb_table.columns:
+                    calibrated[col] = nb_table[col].values
+
         calibrated = calibrated.sort_values(
             by=[BY_QVALUE_COLUMN, EMPIRICAL_PVALUE_COLUMN, "anomaly_score", "ensg_id"],
             ascending=[True, True, False, True],
@@ -553,6 +675,10 @@ def calibrate_ranked_gene_scores(
         if count_space_method == "nb_approx":
             summary_row["min_nb_approx_two_sided_p_value"] = float(
                 np.nanmin(calibrated[NB_TWO_SIDED_PVALUE_COLUMN])
+            )
+        if count_space_method == "nb_outrider" and NB_OUTRIDER_PVALUE_COLUMN in calibrated.columns:
+            summary_row["min_nb_outrider_p_value"] = float(
+                np.nanmin(calibrated[NB_OUTRIDER_PVALUE_COLUMN])
             )
         summary_rows.append(summary_row)
 
@@ -580,7 +706,10 @@ def calibrate_ranked_gene_scores(
         "alpha": alpha,
         "gene_wise_centering": gene_wise_centering,
         "use_student_t": use_student_t,
+        "cohort_mode": cohort_mode,
     }
+    if cohort_mode == "knn_local":
+        run_metadata["knn_k"] = knn_k
     if use_student_t:
         run_metadata["student_t_df"] = student_t_df
     if count_space_method == "nb_approx":
@@ -588,6 +717,13 @@ def calibrate_ranked_gene_scores(
             "Negative-binomial values are a TPM-derived approximation for ranking support only; "
             "they are not raw-count inference and do not reproduce OUTRIDER."
         )
+    if count_space_method == "nb_outrider":
+        run_metadata["count_space_note"] = (
+            "OUTRIDER-style NB test in count space using BulkFormer as the mean model; "
+            "dispersion fitted per gene or with shrinkage."
+        )
+        if count_space_path is not None:
+            run_metadata["count_space_path"] = str(count_space_path)
     return CalibrationResult(
         calibrated_ranked_gene_scores=calibrated_ranked_gene_scores,
         absolute_outliers=absolute_outliers,
@@ -656,15 +792,53 @@ def write_calibration_outputs(result: CalibrationResult, output_dir: Path) -> No
 
 def run(args: argparse.Namespace) -> int:
     """Calibrate ranked anomaly scores across the cohort."""
-    ranked_gene_scores = load_ranked_gene_scores(Path(args.scores))
+    scores_path = Path(args.scores)
+    ranked_gene_scores = load_ranked_gene_scores(scores_path)
+    sample_ids = list(ranked_gene_scores.keys())
     alpha = getattr(args, "alpha", DEFAULT_ALPHA)
+    count_space_path = getattr(args, "count_space_path", None)
+    if count_space_path is not None:
+        count_space_path = Path(count_space_path)
+    nb_cache_dir = getattr(args, "nb_cache_dir", None)
+    if nb_cache_dir is not None:
+        nb_cache_dir = Path(nb_cache_dir)
+    elif args.count_space_method == "nb_outrider":
+        nb_cache_dir = Path(args.output_dir) / "nb_params_cache"
+    cohort_mode = getattr(args, "cohort_mode", "global")
+    knn_k = getattr(args, "knn_k", 50)
+    embeddings = None
+    if cohort_mode == "knn_local":
+        embedding_path = getattr(args, "embedding_path", None)
+        if embedding_path is not None:
+            embeddings = load_embeddings_from_path(Path(embedding_path), sample_ids)
+        if embeddings is None:
+            loaded = load_embeddings_from_scores_dir(scores_path)
+            if loaded is not None:
+                emb_arr, emb_sample_ids = loaded
+                idx_map = {s: i for i, s in enumerate(emb_sample_ids)}
+                if all(s in idx_map for s in sample_ids):
+                    embeddings = np.array(
+                        [emb_arr[idx_map[s]] for s in sample_ids],
+                        dtype=np.float32,
+                    )
+        if embeddings is None:
+            raise ValueError(
+                "cohort_mode knn_local requires embeddings. Either provide --embedding-path "
+                "pointing to a .npy/.npz file, or run calibration on NLL scoring output "
+                "(anomaly score --score-type nll) which saves embeddings to the scores directory."
+            )
     result = calibrate_ranked_gene_scores(
         ranked_gene_scores,
         count_space_method=args.count_space_method,
+        count_space_path=count_space_path,
+        nb_cache_dir=nb_cache_dir,
         alpha=alpha,
         gene_wise_centering=getattr(args, "gene_wise_centering", True),
         use_student_t=getattr(args, "use_student_t", False),
         student_t_df=getattr(args, "student_t_df", DEFAULT_STUDENT_T_DF),
+        cohort_mode=cohort_mode,
+        knn_k=knn_k,
+        embeddings=embeddings,
     )
     validation = validate_outlier_counts(
         result.calibration_summary,

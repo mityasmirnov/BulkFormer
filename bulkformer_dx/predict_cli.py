@@ -132,11 +132,19 @@ def run_predict(args: argparse.Namespace) -> int:
             columns=emb_cols,
         ).to_csv(output_dir / "sample_embeddings.tsv", sep="\t")
 
+    if pred_bundle.sigma_hat is not None:
+        pd.DataFrame(
+            pred_bundle.sigma_hat,
+            index=bundle.sample_ids,
+            columns=bundle.gene_ids,
+        ).to_csv(output_dir / "sigma_hat.tsv", sep="\t")
+
     summary = {
         "samples": len(bundle.sample_ids),
         "genes": len(bundle.gene_ids),
         "embedding_dim": int(pred_bundle.embedding.shape[1]) if pred_bundle.embedding is not None else None,
         "mc_passes": args.mc_passes if args.mc_passes > 0 else None,
+        "sigma_hat_written": pred_bundle.sigma_hat is not None,
     }
     with (output_dir / "predict_run.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
@@ -144,4 +152,6 @@ def run_predict(args: argparse.Namespace) -> int:
     print(f"Wrote {output_dir / 'y_hat.tsv'} ({pred_bundle.y_hat.shape[0]} x {pred_bundle.y_hat.shape[1]})")
     if pred_bundle.embedding is not None:
         print(f"Wrote {output_dir / 'sample_embeddings.tsv'} ({pred_bundle.embedding.shape[0]} x {pred_bundle.embedding.shape[1]})")
+    if pred_bundle.sigma_hat is not None:
+        print(f"Wrote {output_dir / 'sigma_hat.tsv'} (mc_variance)")
     return 0

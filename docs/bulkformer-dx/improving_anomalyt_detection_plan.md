@@ -391,6 +391,9 @@ Reports required for this step
     - dispersion trend plot for NB method,
     - ablation: performance vs MC passes.
 
+
+Provide a notebook to reproduce this analysis!
+
 ## Acceptance criteria and Ralph workflow integration
 
 You must implement this using the repo’s **Ralph workflow** (fresh-context iterations + external verification), so the loop stops only when tests and benchmark checks pass.

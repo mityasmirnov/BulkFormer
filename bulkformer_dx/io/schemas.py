@@ -50,3 +50,52 @@ class ModelPredictionBundle:
     sigma_hat: np.ndarray | None = None
     embedding: np.ndarray | None = None
     mc_samples: np.ndarray | None = None
+
+
+@dataclass(slots=True)
+class MethodConfig:
+    """Configuration for a single anomaly scoring/test method.
+
+    Used by benchmark harness and scoring plugins. JSON/YAML serializable.
+    """
+
+    method_id: str
+    space: str  # "log1p_tpm" | "counts"
+    cohort_mode: str = "global"  # "global" | "knn_local"
+    knn_k: int = 50
+    uncertainty_source: str = "cohort_sigma"  # cohort_sigma | sigma_head | mc_variance | nb_dispersion
+    distribution_family: str = "gaussian"  # gaussian | student_t | negative_binomial
+    test_type: str = "zscore_2s"  # outrider_nb_2s | zscore_2s | empirical_tail | pseudo_likelihood
+    multiple_testing: str = "BY"  # BY | BH | none
+    alpha: float = 0.05
+    mc_passes: int = 16
+    mask_rate: float = 0.15
+    seed: int = 0
+    student_t_df: float = 5.0
+
+
+@dataclass(slots=True)
+class GeneOutlierRow:
+    """Single row of gene-level outlier output (long format)."""
+
+    sample_id: str
+    gene_id: str
+    y_obs: float
+    y_hat: float
+    residual: float
+    score_gene: float
+    p_raw: float | None = None
+    p_adj: float | None = None
+    direction: str | None = None  # "under" | "over"
+    method_id: str = ""
+    diagnostics_json: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class SampleOutlierRow:
+    """Single row of sample-level outlier output."""
+
+    sample_id: str
+    score_sample: float
+    cohort_mode: str = "global"
+    method_id: str = ""

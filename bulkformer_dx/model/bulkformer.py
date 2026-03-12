@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from bulkformer_dx.bulkformer_model import load_bulkformer_model
-from bulkformer_dx.io.schemas import AlignedExpressionBundle, ModelPredictionBundle
+from bulkformer_dx.io.schemas import AlignedExpressionBundle, MethodConfig, ModelPredictionBundle
 
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_MC_PASSES = 16
@@ -127,6 +127,63 @@ def predict_sigma_head(
     return None
 
 
+def predict(
+    bundle: AlignedExpressionBundle,
+    method_config: MethodConfig,
+    *,
+    loaded_model: Any | None = None,
+    variant: str | None = None,
+    checkpoint_path: str | Path | None = None,
+    model_dir: Path | None = None,
+    device: str = "cpu",
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    model_kwargs: dict[str, Any] | None = None,
+) -> ModelPredictionBundle:
+    """Unified inference entrypoint driven by MethodConfig.
+
+    Dispatches to predict_mean (no MC) or mc_predict (MC masking) based on
+    method_config.mc_passes. Uses method_config.seed for deterministic MC masking.
+
+    Args:
+        bundle: Aligned expression data.
+        method_config: Method configuration (mc_passes, mask_rate, seed, etc.).
+        loaded_model: Optional LoadedBulkFormer to reuse.
+        variant: Model variant.
+        checkpoint_path: Explicit checkpoint path.
+        model_dir: Directory to search for checkpoints.
+        device: Device for inference.
+        batch_size: Batch size for forward passes.
+        model_kwargs: Additional kwargs for load_bulkformer_model.
+
+    Returns:
+        ModelPredictionBundle with y_hat, embedding, and optional sigma_hat/mc_samples.
+    """
+    if method_config.mc_passes > 0:
+        pred_bundle, _ = mc_predict(
+            bundle,
+            loaded_model=loaded_model,
+            mc_passes=method_config.mc_passes,
+            mask_prob=method_config.mask_rate,
+            seed=method_config.seed,
+            batch_size=batch_size,
+            variant=variant,
+            checkpoint_path=checkpoint_path,
+            device=device,
+            model_kwargs=model_kwargs,
+        )
+        return pred_bundle
+    return predict_mean(
+        bundle,
+        loaded_model=loaded_model,
+        variant=variant,
+        checkpoint_path=checkpoint_path,
+        model_dir=model_dir,
+        device=device,
+        batch_size=batch_size,
+        model_kwargs=model_kwargs,
+    )
+
+
 def mc_predict(
     bundle: AlignedExpressionBundle,
     *,
@@ -209,6 +266,10 @@ def mc_predict(
         mc_samples[pass_idx] = pred
 
     mu = np.nanmean(mc_samples, axis=0).astype(np.float32)
+    sigma_hat = None
+    if mc_passes > 1:
+        sigma_hat = np.nanstd(mc_samples, axis=0, ddof=1).astype(np.float32)
+        sigma_hat = np.maximum(sigma_hat, 1e-6)
     embedding = extract_sample_embeddings(
         loaded.model,
         Y,
@@ -221,7 +282,7 @@ def mc_predict(
     return (
         ModelPredictionBundle(
             y_hat=mu,
-            sigma_hat=None,
+            sigma_hat=sigma_hat,
             embedding=embedding,
             mc_samples=mc_samples,
         ),

@@ -101,6 +101,12 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         default=scoring.DEFAULT_RANDOM_SEED,
         help="Random seed used for Monte Carlo mask generation.",
     )
+    score_parser.add_argument(
+        "--score-type",
+        choices=("residual", "nll"),
+        default="residual",
+        help="Scoring method: residual (MC mean abs residual) or nll (TabPFN-style pseudo-likelihood).",
+    )
     score_parser.set_defaults(func=scoring.run)
 
     head_parser = anomaly_subparsers.add_parser(
@@ -239,9 +245,23 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         choices=calibration.SUPPORTED_COUNT_SPACE_METHODS,
         default=calibration.DEFAULT_COUNT_SPACE_METHOD,
         help=(
-            "Optional count-space support path. 'nb_approx' adds a TPM-derived negative-binomial "
-            "approximation and is clearly labeled as approximate."
+            "Optional count-space support. 'nb_approx' adds a TPM-derived negative-binomial "
+            "approximation. 'nb_outrider' runs OUTRIDER-style NB test in count space (requires "
+            "--count-space-path)."
         ),
+    )
+    calibrate_parser.add_argument(
+        "--count-space-path",
+        default=None,
+        help=(
+            "Path to preprocess output directory containing aligned_counts.tsv, "
+            "gene_lengths_aligned.tsv, sample_scaling.tsv. Required for nb_outrider."
+        ),
+    )
+    calibrate_parser.add_argument(
+        "--nb-cache-dir",
+        default=None,
+        help="Directory to cache NB dispersion parameters (for nb_outrider). Default: output_dir.",
     )
     calibrate_parser.add_argument(
         "--alpha",
@@ -266,6 +286,23 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         type=float,
         default=calibration.DEFAULT_STUDENT_T_DF,
         help="Degrees of freedom for Student-t when --student-t is used.",
+    )
+    calibrate_parser.add_argument(
+        "--cohort-mode",
+        choices=("global", "knn_local"),
+        default="global",
+        help="Cohort for sigma/calibration: global (all samples) or knn_local (k nearest in embedding space).",
+    )
+    calibrate_parser.add_argument(
+        "--knn-k",
+        type=int,
+        default=50,
+        help="Number of nearest neighbors when --cohort-mode knn_local. Ignored for global.",
+    )
+    calibrate_parser.add_argument(
+        "--embedding-path",
+        default=None,
+        help="Path to embeddings .npy/.npz for knn_local. If omitted, loads from scores dir when NLL scoring saved them.",
     )
     calibrate_parser.set_defaults(func=calibration.run)
 

@@ -364,6 +364,14 @@ def write_anomaly_outputs(result: AnomalyScoringResult, output_dir: Path) -> Non
 
 def run(args: argparse.Namespace) -> int:
     """Execute Monte Carlo masking anomaly scoring."""
+    score_type = getattr(args, "score_type", "residual")
+    if score_type == "nll":
+        return _run_nll(args)
+    return _run_residual(args)
+
+
+def _run_residual(args: argparse.Namespace) -> int:
+    """Execute residual-based anomaly scoring."""
     expression = load_aligned_expression(Path(args.input))
     valid_gene_mask = load_valid_gene_mask(Path(args.valid_gene_mask))
     model_kwargs: dict[str, Any] = {
@@ -409,6 +417,191 @@ def run(args: argparse.Namespace) -> int:
             valid_genes=result.run_metadata["valid_gene_count"],
             mc_passes=result.run_metadata["mc_passes"],
             mean_abs=float(result.cohort_scores["mean_abs_residual"].mean()),
+        )
+    )
+    return 0
+
+
+def _run_nll(args: argparse.Namespace) -> int:
+    """Execute NLL (pseudo-likelihood) anomaly scoring."""
+    from pathlib import Path
+
+    from bulkformer_dx.io.schemas import AlignedExpressionBundle
+    from bulkformer_dx.model.bulkformer import mc_predict
+    from bulkformer_dx.scoring.pseudolikelihood import compute_mc_masked_loglikelihood_scores
+
+    input_path = Path(args.input)
+    if input_path.is_dir():
+        expr_path = input_path / "aligned_log1p_tpm.tsv"
+        valid_mask_path = input_path / "valid_gene_mask.tsv"
+        input_dir = input_path
+    else:
+        expr_path = input_path
+        valid_mask_path = Path(args.valid_gene_mask)
+        input_dir = input_path.parent
+
+    expression = load_aligned_expression(expr_path)
+    valid_gene_mask = load_valid_gene_mask(valid_mask_path)
+    valid_flags = resolve_valid_gene_flags(valid_gene_mask, expression.columns)
+    Y = expression.to_numpy(dtype=np.float32)
+    gene_ids = [str(g) for g in expression.columns]
+    sample_ids = [str(s) for s in expression.index]
+    valid_mask = np.broadcast_to(valid_flags, (len(sample_ids), len(gene_ids)))
+    counts = None
+    gene_length_kb = None
+    tpm_scaling_S = None
+    if (input_dir / "aligned_counts.tsv").exists():
+        counts_df = load_aligned_expression(input_dir / "aligned_counts.tsv")
+        counts = counts_df.to_numpy(dtype=np.float32)
+    if (input_dir / "gene_lengths_aligned.tsv").exists():
+        import pandas as pd
+        lengths_df = pd.read_csv(input_dir / "gene_lengths_aligned.tsv", sep="\t")
+        if "length_kb" in lengths_df.columns:
+            lengths_df = lengths_df.set_index("ensg_id").reindex(gene_ids)
+            gene_length_kb = lengths_df["length_kb"].to_numpy(dtype=np.float32)
+    if (input_dir / "sample_scaling.tsv").exists():
+        import pandas as pd
+        scaling_df = pd.read_csv(input_dir / "sample_scaling.tsv", sep="\t")
+        if "S_j" in scaling_df.columns:
+            scaling_df = scaling_df.set_index("sample_id").reindex(sample_ids)
+            tpm_scaling_S = scaling_df["S_j"].to_numpy(dtype=np.float32)
+    bundle = AlignedExpressionBundle(
+        expr_space="log1p_tpm",
+        Y_obs=Y,
+        valid_mask=valid_mask,
+        gene_ids=gene_ids,
+        sample_ids=sample_ids,
+        counts=counts,
+        gene_length_kb=gene_length_kb,
+        tpm_scaling_S=tpm_scaling_S,
+        metadata=None,
+    )
+
+    model_kwargs: dict[str, Any] = {
+        "variant": args.variant,
+        "checkpoint_path": args.checkpoint_path,
+        "device": args.device,
+    }
+    if args.graph_path is not None:
+        model_kwargs["graph_path"] = args.graph_path
+    if args.graph_weights_path is not None:
+        model_kwargs["graph_weights_path"] = args.graph_weights_path
+    if args.gene_embedding_path is not None:
+        model_kwargs["gene_embedding_path"] = args.gene_embedding_path
+    if args.gene_info_path is not None:
+        model_kwargs["gene_info_path"] = args.gene_info_path
+    loaded_model = load_bulkformer_model(**model_kwargs)
+
+    pred_bundle, mc_samples = mc_predict(
+        bundle,
+        loaded_model=loaded_model,
+        mc_passes=args.mc_passes,
+        mask_prob=args.mask_prob,
+        seed=args.random_seed,
+    )
+    pred_bundle = type(pred_bundle)(
+        y_hat=pred_bundle.y_hat,
+        sigma_hat=pred_bundle.sigma_hat,
+        embedding=pred_bundle.embedding,
+        mc_samples=mc_samples,
+    )
+
+    ranked_gene_scores, cohort_scores = compute_mc_masked_loglikelihood_scores(
+        bundle,
+        pred_bundle,
+        mc_passes=args.mc_passes,
+        mask_prob=args.mask_prob,
+        seed=args.random_seed,
+    )
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ranked_dir = output_dir / "ranked_genes"
+    ranked_dir.mkdir(parents=True, exist_ok=True)
+    valid_gene_count = int(valid_flags.sum())
+
+    cohort_rows = []
+    for sample_id, df in ranked_gene_scores.items():
+        if df.empty:
+            cohort_rows.append({
+                "sample_id": sample_id,
+                "mean_abs_residual": np.nan,
+                "valid_gene_count": valid_gene_count,
+                "mc_passes": args.mc_passes,
+                "masked_observations": 0,
+                "genes_scored": 0,
+                "gene_coverage_fraction": 0.0,
+                "rmse": np.nan,
+                "median_gene_score": np.nan,
+            })
+            continue
+        compat = df.rename(columns={
+            "gene_id": "ensg_id",
+            "score_gene": "anomaly_score",
+            "y_obs": "observed_expression",
+            "y_hat": "mean_predicted_expression",
+        }).copy()
+        compat["mean_signed_residual"] = compat["residual"]
+        compat["rmse"] = np.nan
+        if "diagnostics_json" in compat.columns:
+            compat["masked_count"] = compat["diagnostics_json"].apply(
+                lambda x: x.get("masked_count", args.mc_passes) if isinstance(x, dict) else args.mc_passes
+            )
+        else:
+            compat["masked_count"] = args.mc_passes
+        compat["coverage_fraction"] = compat["masked_count"] / args.mc_passes
+        masked_obs = int(compat["masked_count"].sum())
+        compat = compat[
+            ["ensg_id", "anomaly_score", "mean_signed_residual", "rmse", "masked_count",
+             "coverage_fraction", "observed_expression", "mean_predicted_expression"]
+        ]
+        compat.to_csv(ranked_dir / f"{_sanitize_filename(sample_id)}.tsv", sep="\t", index=False)
+        cohort_rows.append({
+            "sample_id": sample_id,
+            "mean_abs_residual": float(df["score_gene"].mean()),
+            "valid_gene_count": valid_gene_count,
+            "mc_passes": args.mc_passes,
+            "masked_observations": masked_obs,
+            "genes_scored": len(df),
+            "gene_coverage_fraction": len(df) / max(valid_gene_count, 1),
+            "rmse": np.nan,
+            "median_gene_score": float(df["score_gene"].median()),
+        })
+    cohort_compat = pd.DataFrame(cohort_rows).set_index("sample_id")
+    cohort_compat.to_csv(output_dir / "cohort_scores.tsv", sep="\t")
+
+    if pred_bundle.embedding is not None:
+        np.save(
+            output_dir / "embeddings.npy",
+            np.asarray(pred_bundle.embedding, dtype=np.float32),
+            allow_pickle=False,
+        )
+
+    gene_qc = pd.DataFrame({
+        "ensg_id": bundle.gene_ids,
+        "is_valid": valid_flags.astype(int),
+    })
+    gene_qc.to_csv(output_dir / "gene_qc.tsv", sep="\t", index=False)
+
+    run_metadata = {
+        "samples": len(bundle.sample_ids),
+        "genes": len(bundle.gene_ids),
+        "valid_gene_count": valid_gene_count,
+        "mc_passes": args.mc_passes,
+        "mask_prob": args.mask_prob,
+        "score_type": "nll",
+    }
+    with (output_dir / "anomaly_run.json").open("w", encoding="utf-8") as handle:
+        json.dump(run_metadata, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+    print(f"Wrote NLL anomaly scoring outputs to {output_dir}")
+    print(
+        "Samples: {samples} | valid genes: {valid_genes} | MC passes: {mc_passes} | "
+        "score_type: nll".format(
+            samples=run_metadata["samples"],
+            valid_genes=valid_gene_count,
+            mc_passes=args.mc_passes,
         )
     )
     return 0
