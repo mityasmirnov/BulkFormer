@@ -34,6 +34,48 @@ class AnomalyScoringResult:
 Predictor = Callable[[np.ndarray, float], np.ndarray]
 
 
+def assert_finite_scores(
+    ranked_gene_scores: dict[str, pd.DataFrame],
+    *,
+    score_column: str = "anomaly_score",
+) -> None:
+    """Assert all anomaly scores are finite; dump diagnostics on failure.
+
+    Raises:
+        ValueError: If any sample has non-finite scores, with diagnostic
+            details (sample id, gene indices, observed/predicted values).
+    """
+    bad_samples: list[dict[str, Any]] = []
+    for sample_id, table in ranked_gene_scores.items():
+        if table.empty:
+            continue
+        col = score_column if score_column in table.columns else "score_gene"
+        if col not in table.columns:
+            continue
+        scores = pd.to_numeric(table[col], errors="coerce")
+        nonfinite_mask = ~np.isfinite(scores.to_numpy(dtype=float))
+        if nonfinite_mask.any():
+            bad_rows = table.loc[nonfinite_mask]
+            diag: dict[str, Any] = {
+                "sample_id": sample_id,
+                "n_nonfinite": int(nonfinite_mask.sum()),
+                "gene_ids": bad_rows["ensg_id"].tolist()[:20] if "ensg_id" in bad_rows.columns
+                    else bad_rows.get("gene_id", pd.Series()).tolist()[:20],
+            }
+            for extra_col in ("observed_expression", "mean_predicted_expression", "y_obs", "y_hat"):
+                if extra_col in bad_rows.columns:
+                    vals = bad_rows[extra_col].tolist()[:20]
+                    diag[extra_col] = vals
+            bad_samples.append(diag)
+    if bad_samples:
+        import json as _json
+        dump = _json.dumps(bad_samples, indent=2, default=str)
+        raise ValueError(
+            f"Non-finite {score_column} detected in {len(bad_samples)} sample(s).\n"
+            f"Diagnostic dump:\n{dump}"
+        )
+
+
 def _read_table(path: Path) -> pd.DataFrame:
     suffix = path.suffix.lower()
     separator = "\t" if suffix in {".tsv", ".txt"} else ","
@@ -337,6 +379,7 @@ def score_expression_anomalies(
 
 def write_anomaly_outputs(result: AnomalyScoringResult, output_dir: Path) -> None:
     """Write anomaly scoring tables and QC outputs to disk."""
+    assert_finite_scores(result.ranked_gene_scores)
     output_dir.mkdir(parents=True, exist_ok=True)
     ranked_dir = output_dir / "ranked_genes"
     ranked_dir.mkdir(parents=True, exist_ok=True)
@@ -529,6 +572,9 @@ def _run_nll(args: argparse.Namespace) -> int:
     ranked_dir = output_dir / "ranked_genes"
     ranked_dir.mkdir(parents=True, exist_ok=True)
     valid_gene_count = int(valid_flags.sum())
+
+    # Validate all NLL scores are finite before writing
+    assert_finite_scores(ranked_gene_scores, score_column="anomaly_score")
 
     cohort_rows = []
     for sample_id, df in ranked_gene_scores.items():

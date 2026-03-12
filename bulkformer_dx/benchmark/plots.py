@@ -191,8 +191,10 @@ def plot_pvalue_histogram(
 def plot_pvalue_qq(
     p_values: np.ndarray,
     output_path: Path,
+    *,
+    ci_band: bool = True,
 ) -> Path | None:
-    """QQ plot of p-values vs Uniform(0,1)."""
+    """QQ plot of p-values vs Uniform(0,1) with optional 95 % Kolmogorov CI band."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -208,12 +210,141 @@ def plot_pvalue_qq(
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.scatter(theoretical, p_values, alpha=0.5, s=5)
     ax.plot([0, 1], [0, 1], "r--", label="Uniform(0,1)")
+    if ci_band and n >= 10:
+        # Kolmogorov 95 % band: ±1.36 / sqrt(n)
+        ks_epsilon = 1.36 / np.sqrt(n)
+        lower = np.clip(theoretical - ks_epsilon, 0, 1)
+        upper = np.clip(theoretical + ks_epsilon, 0, 1)
+        ax.fill_between(theoretical, lower, upper, alpha=0.15, color="gray", label="95 % CI")
     ax.set_xlabel("Theoretical quantile")
     ax.set_ylabel("Sample quantile")
     ax.set_title("P-value QQ Plot")
     ax.legend()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
+def plot_expected_vs_observed_discoveries(
+    p_values: np.ndarray,
+    output_path: Path,
+    *,
+    n_total_tests: int | None = None,
+    alpha_grid: np.ndarray | None = None,
+) -> Path | None:
+    """Line plot of expected vs observed discoveries across α thresholds.
+
+    Under perfect calibration, observed ≈ expected at every α.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    p = np.asarray(p_values, dtype=float).ravel()
+    p = p[np.isfinite(p) & (p >= 0) & (p <= 1)]
+    if p.size < 2:
+        return None
+    n_total = n_total_tests if n_total_tests is not None else int(p.size)
+    if alpha_grid is None:
+        alpha_grid = np.concatenate([
+            np.arange(0.001, 0.01, 0.001),
+            np.arange(0.01, 0.11, 0.01),
+        ])
+    expected = alpha_grid * n_total
+    observed = np.array([int(np.count_nonzero(p <= a)) for a in alpha_grid])
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.plot(alpha_grid, expected, "r--", label="Expected (uniform null)")
+    ax.plot(alpha_grid, observed, "b-o", markersize=3, label="Observed")
+    ax.set_xlabel("α threshold")
+    ax.set_ylabel("Number of discoveries")
+    ax.set_title("Expected vs Observed Discoveries")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
+def plot_residual_variance_vs_mean(
+    gene_means: np.ndarray,
+    gene_variances: np.ndarray,
+    output_path: Path,
+    *,
+    gene_names: list[str] | None = None,
+) -> Path | None:
+    """Scatter of per-gene residual variance vs mean expression.
+
+    Reveals whether a constant sigma is appropriate or low/high-expression
+    genes have disproportionate variance, driving inflation.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    means = np.asarray(gene_means, dtype=float).ravel()
+    variances = np.asarray(gene_variances, dtype=float).ravel()
+    valid = np.isfinite(means) & np.isfinite(variances) & (means > 0) & (variances > 0)
+    if valid.sum() < 2:
+        return None
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.scatter(means[valid], variances[valid], alpha=0.4, s=8)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Mean expression (log scale)")
+    ax.set_ylabel("Residual variance (log scale)")
+    ax.set_title("Residual Variance vs Gene Mean Expression")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
+def plot_stratified_pvalue_histograms(
+    strata_pvalues: dict[str, np.ndarray],
+    output_path: Path,
+    *,
+    n_bins: int = 20,
+) -> Path | None:
+    """Subplot grid of p-value histograms, one per stratum.
+
+    Args:
+        strata_pvalues: stratum_label -> 1-D p-values.
+        output_path: Path for the combined figure.
+        n_bins: Number of histogram bins.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    strata = {k: v for k, v in strata_pvalues.items() if len(v) >= 2}
+    if not strata:
+        return None
+    n = len(strata)
+    cols = min(n, 3)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows), squeeze=False)
+    for idx, (label, pvals) in enumerate(strata.items()):
+        ax = axes[idx // cols][idx % cols]
+        p = np.asarray(pvals, dtype=float).ravel()
+        p = p[np.isfinite(p) & (p >= 0) & (p <= 1)]
+        ax.hist(p, bins=n_bins, range=(0, 1), edgecolor="black", alpha=0.7)
+        ax.axhline(p.size / n_bins, color="red", linestyle="--", alpha=0.6)
+        ax.set_title(f"{label} (n={p.size})")
+        ax.set_xlabel("p-value")
+        ax.set_ylabel("Count")
+    # Hide unused subplots
+    for idx in range(n, rows * cols):
+        axes[idx // cols][idx % cols].set_visible(False)
+    fig.suptitle("Stratified P-value Distributions", fontsize=13)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close()

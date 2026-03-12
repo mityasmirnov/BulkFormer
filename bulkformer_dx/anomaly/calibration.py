@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,8 @@ REQUIRED_RANKED_COLUMNS = {
     "observed_expression",
     "mean_predicted_expression",
 }
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -117,6 +120,13 @@ def _validate_ranked_gene_table(table: pd.DataFrame, *, sample_id: str) -> pd.Da
         finite_mask &= np.isfinite(resolved[column])
     n_dropped = (~finite_mask).sum()
     if n_dropped > 0:
+        dropped_genes = resolved.loc[~finite_mask, "ensg_id"].tolist()
+        preview = ", ".join(str(g) for g in dropped_genes[:10])
+        _logger.warning(
+            "Sample %s: dropped %d rows with non-finite values in %s. "
+            "Genes (first 10): %s",
+            sample_id, n_dropped, numeric_columns, preview,
+        )
         resolved = resolved.loc[finite_mask].copy()
     if not resolved["ensg_id"].is_unique:
         raise ValueError(f"Ranked gene table for sample {sample_id!r} contains duplicate genes.")
@@ -730,6 +740,48 @@ def calibrate_ranked_gene_scores(
         )
         if count_space_path is not None:
             run_metadata["count_space_path"] = str(count_space_path)
+
+    # ---- Null calibration diagnostics per method path ----
+    from bulkformer_dx.benchmark.metrics import compute_calibration_diagnostics
+    import dataclasses
+
+    cal_diag: dict[str, Any] = {}
+    # Empirical BY p-values
+    all_empirical = np.concatenate([
+        table[EMPIRICAL_PVALUE_COLUMN].to_numpy(dtype=float)
+        for table in calibrated_ranked_gene_scores.values()
+    ])
+    diag = compute_calibration_diagnostics(all_empirical, label="empirical")
+    cal_diag["empirical"] = dataclasses.asdict(diag)
+    # Absolute z-score raw p-values
+    all_abs_raw = np.concatenate([
+        table[RAW_PVALUE_COLUMN].to_numpy(dtype=float)
+        for table in calibrated_ranked_gene_scores.values()
+    ])
+    diag = compute_calibration_diagnostics(all_abs_raw, label="absolute_zscore")
+    cal_diag["absolute_zscore"] = dataclasses.asdict(diag)
+    # NB approx
+    if count_space_method == "nb_approx":
+        all_nb_2s = np.concatenate([
+            table[NB_TWO_SIDED_PVALUE_COLUMN].to_numpy(dtype=float)
+            for table in calibrated_ranked_gene_scores.values()
+            if NB_TWO_SIDED_PVALUE_COLUMN in table.columns
+        ]) if any(NB_TWO_SIDED_PVALUE_COLUMN in t.columns for t in calibrated_ranked_gene_scores.values()) else np.array([])
+        if all_nb_2s.size > 0:
+            diag = compute_calibration_diagnostics(all_nb_2s, label="nb_approx")
+            cal_diag["nb_approx"] = dataclasses.asdict(diag)
+    # NB outrider
+    if count_space_method == "nb_outrider":
+        all_nb_out = np.concatenate([
+            table[NB_OUTRIDER_PVALUE_COLUMN].to_numpy(dtype=float)
+            for table in calibrated_ranked_gene_scores.values()
+            if NB_OUTRIDER_PVALUE_COLUMN in table.columns
+        ]) if any(NB_OUTRIDER_PVALUE_COLUMN in t.columns for t in calibrated_ranked_gene_scores.values()) else np.array([])
+        if all_nb_out.size > 0:
+            diag = compute_calibration_diagnostics(all_nb_out, label="nb_outrider")
+            cal_diag["nb_outrider"] = dataclasses.asdict(diag)
+    run_metadata["calibration_diagnostics"] = cal_diag
+
     return CalibrationResult(
         calibrated_ranked_gene_scores=calibrated_ranked_gene_scores,
         absolute_outliers=absolute_outliers,

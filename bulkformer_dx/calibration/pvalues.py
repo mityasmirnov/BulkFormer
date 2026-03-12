@@ -63,3 +63,59 @@ def zscore_two_sided_pvalue(
     else:
         p = 2.0 * norm.sf(abs_z)
     return np.clip(p, 0.0, 1.0)
+
+
+def compute_stratified_calibration(
+    p_values: np.ndarray,
+    strata_labels: np.ndarray,
+    *,
+    n_bins_if_continuous: int = 5,
+) -> dict[str, np.ndarray]:
+    """Group p-values by strata labels and return dict of label -> p-values.
+
+    If strata_labels are numeric with many unique values, they are binned into
+    quantile-based buckets. Otherwise labels are used directly.
+
+    Args:
+        p_values: 1-D array of p-values.
+        strata_labels: 1-D array of labels (same length as p_values).
+        n_bins_if_continuous: Number of quantile bins for continuous labels.
+
+    Returns:
+        Dict mapping stratum name -> array of p-values for that stratum.
+    """
+    p = np.asarray(p_values, dtype=float).ravel()
+    labels = np.asarray(strata_labels).ravel()
+    if p.shape != labels.shape:
+        raise ValueError("p_values and strata_labels must have the same length.")
+
+    finite_mask = np.isfinite(p) & (p >= 0) & (p <= 1)
+    p = p[finite_mask]
+    labels = labels[finite_mask]
+
+    # Decide whether to bin numeric labels
+    try:
+        num_labels = labels.astype(float)
+        n_unique = len(np.unique(num_labels[np.isfinite(num_labels)]))
+        if n_unique > n_bins_if_continuous * 2:
+            # Quantile-bin
+            edges = np.nanquantile(num_labels, np.linspace(0, 1, n_bins_if_continuous + 1))
+            edges = np.unique(edges)
+            bin_idx = np.digitize(num_labels, edges[1:-1])
+            result: dict[str, np.ndarray] = {}
+            for b in range(len(edges) - 1):
+                mask = bin_idx == b
+                if mask.sum() >= 2:
+                    lo, hi = edges[b], edges[b + 1]
+                    result[f"{lo:.2g}–{hi:.2g}"] = p[mask]
+            return result
+    except (ValueError, TypeError):
+        pass
+
+    # Categorical labels
+    result = {}
+    for label in sorted(set(labels)):
+        mask = labels == label
+        if mask.sum() >= 2:
+            result[str(label)] = p[mask]
+    return result

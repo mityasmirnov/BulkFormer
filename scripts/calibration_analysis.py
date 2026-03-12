@@ -18,6 +18,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from bulkformer_dx.benchmark.plots import (
+    plot_pvalue_qq,
+    plot_expected_vs_observed_discoveries,
+    plot_residual_variance_vs_mean,
+)
+
 
 def load_calibration(variant: str) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Load calibration_summary, absolute_outliers, and calibration_run.json."""
@@ -246,6 +252,51 @@ def main() -> int:
     # Z-score distribution
     plot_zscore_distribution(outliers, out_dir / f"calibration_zscore_dist_{args.variant}.png")
     print(f"Wrote z-score distribution to {out_dir}")
+
+    # --- New Calibration Diagnostics ---
+    cal_diag = meta.get("calibration_diagnostics", {})
+    if cal_diag:
+        print("\nNull Calibration Diagnostics:")
+        for method, diag in cal_diag.items():
+            print(f"  Method: {method}")
+            print(f"    KS stat: {diag.get('ks_stat', '?')}")
+            print(f"    Min p:   {diag.get('min_p', '?')}")
+            dt = diag.get("discovery_table", {})
+            if dt:
+                print("    Discovery Table (Expected vs Observed):")
+                for alpha_val, stats in dt.items():
+                    print(f"      alpha={alpha_val}: exp={stats['expected']}, obs={stats['observed']} (ratio={stats['ratio']})")
+
+        # QQ Plot override (use improved version with CI band)
+        # We need raw p-values for all genes to make a cohort-wide QQ plot.
+        # We'll use the 'absolute_zscore' path p-values as it's the most common target for calibration issues.
+        p_raw = outliers["raw_p_value"].values
+        plot_pvalue_qq(
+            p_raw,
+            out_dir / f"calibration_qq_cohort_{args.variant}.png",
+            ci_band=True,
+        )
+        print(f"Wrote cohort QQ plot to {out_dir}")
+
+        plot_expected_vs_observed_discoveries(
+            p_raw,
+            out_dir / f"calibration_discoveries_{args.variant}.png",
+        )
+        print(f"Wrote expected-vs-observed discoveries plot to {out_dir}")
+
+    # Variance vs Mean
+    if "observed_log1p_tpm" in outliers.columns and "expected_mu" in outliers.columns:
+        # Compute cohort-wide per-gene mean and variance of residuals
+        outliers["residual"] = outliers["observed_log1p_tpm"] - outliers["expected_mu"]
+        gene_stats = outliers.groupby("gene")["residual"].agg(["mean", "var"])
+        gene_means = outliers.groupby("gene")["observed_log1p_tpm"].mean()
+
+        plot_residual_variance_vs_mean(
+            gene_means.values,
+            gene_stats["var"].values,
+            out_dir / f"calibration_variance_vs_mean_{args.variant}.png",
+        )
+        print(f"Wrote variance-vs-mean plot to {out_dir}")
 
     # Summary stats
     summary_path = out_dir / f"calibration_summary_stats_{args.variant}.json"

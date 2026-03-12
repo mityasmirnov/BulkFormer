@@ -125,3 +125,30 @@ def test_score_expression_anomalies_passes_row_consistent_mask_fraction() -> Non
         mask_prob=0.5,
         mask_plan=mask_plan,
     )
+
+
+def test_finite_anomaly_scores() -> None:
+    """Test that assert_finite_scores catches NaNs and score_expression_anomalies produces finite scores."""
+    from bulkformer_dx.anomaly.scoring import assert_finite_scores
+
+    # 1. Normal finite case
+    ranked = {
+        "s1": pd.DataFrame({"ensg_id": ["G1"], "anomaly_score": [1.0]}),
+        "s2": pd.DataFrame({"ensg_id": ["G1"], "anomaly_score": [2.0]}),
+    }
+    assert_finite_scores(ranked)  # Should not raise
+
+    # 2. Non-finite case
+    ranked_bad = {
+        "s1": pd.DataFrame({"ensg_id": ["G1"], "anomaly_score": [np.nan]}),
+    }
+    import pytest
+    with pytest.raises(ValueError, match="Non-finite anomaly_score detected"):
+        assert_finite_scores(ranked_bad)
+
+    # 3. Check name variations (score_gene)
+    ranked_alt = {
+        "s1": pd.DataFrame({"gene_id": ["G1"], "score_gene": [np.inf]}),
+    }
+    with pytest.raises(ValueError, match="Non-finite anomaly_score detected"):
+        assert_finite_scores(ranked_alt)

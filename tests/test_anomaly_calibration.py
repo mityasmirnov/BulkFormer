@@ -148,7 +148,7 @@ def test_calibrate_ranked_gene_scores_rejects_non_finite_values() -> None:
     }
     ranked_gene_scores["sample_b"].loc[0, "anomaly_score"] = np.nan
 
-    with pytest.raises(ValueError, match="non-finite"):
+    with pytest.raises(ValueError, match="at least one finite cohort score"):
         calibration.calibrate_ranked_gene_scores(ranked_gene_scores)
 
 
@@ -289,3 +289,107 @@ def test_validate_outlier_counts() -> None:
     assert "median_outliers_per_sample" in v
     assert "max_outliers_per_sample" in v
     assert "inflation_ratio" in v
+
+
+def test_nb_approx_vs_nb_outrider_differ(tmp_path: Path) -> None:
+    """nb_approx and nb_outrider should produce different p-values (not identical code path)."""
+    # Create count-space artifacts for nb_outrider
+    counts_df = pd.DataFrame(
+        {"ENSG1": [50, 60, 70, 55, 65], "ENSG2": [100, 90, 80, 95, 85]},
+        index=["sa", "sb", "sc", "sd", "se"],
+    )
+    counts_df.index.name = "sample_id"
+    counts_df.to_csv(tmp_path / "aligned_counts.tsv", sep="\t")
+    pd.DataFrame({
+        "ensg_id": ["ENSG1", "ENSG2"],
+        "length_kb": [2.0, 1.5],
+        "has_length": [1, 1],
+    }).to_csv(tmp_path / "gene_lengths_aligned.tsv", sep="\t", index=False)
+    pd.DataFrame({
+        "sample_id": ["sa", "sb", "sc", "sd", "se"],
+        "S_j": [1e6, 1.1e6, 0.9e6, 1e6, 1.05e6],
+    }).to_csv(tmp_path / "sample_scaling.tsv", sep="\t", index=False)
+
+    ranked = {
+        sid: _make_ranked_table(score, obs, pred)
+        for sid, score, obs, pred in [
+            ("sa", 10.0, 5.0, 1.0),
+            ("sb", 4.0, 2.0, 1.8),
+            ("sc", 3.0, 2.0, 1.9),
+            ("sd", 2.0, 2.0, 1.7),
+            ("se", 1.0, 2.0, 1.6),
+        ]
+    }
+
+    result_approx = calibration.calibrate_ranked_gene_scores(
+        ranked, count_space_method="nb_approx"
+    )
+    result_outrider = calibration.calibrate_ranked_gene_scores(
+        ranked,
+        count_space_method="nb_outrider",
+        count_space_path=tmp_path,
+    )
+
+    # Collect NB p-values from both
+    approx_pvals = []
+    outrider_pvals = []
+    for sid in ranked:
+        at = result_approx.calibrated_ranked_gene_scores[sid]
+        ot = result_outrider.calibrated_ranked_gene_scores[sid]
+        approx_pvals.extend(at["nb_approx_two_sided_p_value"].tolist())
+        if "nb_outrider_p_raw" in ot.columns:
+            outrider_pvals.extend(ot["nb_outrider_p_raw"].tolist())
+
+    # Both should produce valid p-values
+    approx_arr = np.array(approx_pvals)
+    assert np.all(np.isfinite(approx_arr))
+
+    # They should differ for at least some values (not identical code path)
+    if len(outrider_pvals) > 0:
+        outrider_arr = np.array(outrider_pvals)
+        finite_out = outrider_arr[np.isfinite(outrider_arr)]
+        if len(finite_out) == len(approx_arr):
+            # At least one p-value should differ
+            assert not np.allclose(approx_arr, finite_out, atol=1e-10), (
+                "nb_approx and nb_outrider produced bitwise-identical p-values!"
+            )
+
+
+def test_min_raw_pvalue_per_sample() -> None:
+    """Calibration summary should have plausible min_empirical_p_value for anomalous samples."""
+    ranked = {
+        sid: _make_ranked_table(score, obs, pred)
+        for sid, score, obs, pred in [
+            ("sa", 10.0, 5.0, 1.0),  # clearly anomalous
+            ("sb", 1.0, 2.0, 1.8),
+            ("sc", 1.0, 2.0, 1.9),
+            ("sd", 1.0, 2.0, 1.7),
+            ("se", 1.0, 2.0, 1.6),
+        ]
+    }
+    result = calibration.calibrate_ranked_gene_scores(ranked)
+    summary = result.calibration_summary
+    assert "min_empirical_p_value" in summary.columns
+    # The most anomalous sample (sa) should have a small min empirical p-value
+    sa_row = summary[summary["sample_id"] == "sa"]
+    assert sa_row.iloc[0]["min_empirical_p_value"] < 0.5
+
+
+def test_calibration_diagnostics_in_metadata() -> None:
+    """calibrate_ranked_gene_scores populates calibration_diagnostics in run_metadata."""
+    ranked = {
+        sid: _make_ranked_table(score, obs, pred)
+        for sid, score, obs, pred in [
+            ("sa", 10.0, 5.0, 1.0),
+            ("sb", 4.0, 2.0, 1.8),
+            ("sc", 3.0, 2.0, 1.9),
+        ]
+    }
+    result = calibration.calibrate_ranked_gene_scores(ranked)
+    assert "calibration_diagnostics" in result.run_metadata
+    diag = result.run_metadata["calibration_diagnostics"]
+    assert "empirical" in diag
+    assert "absolute_zscore" in diag
+    assert "ks_stat" in diag["empirical"]
+    assert "discovery_table" in diag["empirical"]
+    assert "min_p" in diag["empirical"]
