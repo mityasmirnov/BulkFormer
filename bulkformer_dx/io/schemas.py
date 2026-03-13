@@ -70,6 +70,8 @@ class MethodConfig:
     alpha: float = 0.05
     mc_passes: int = 16
     mask_rate: float = 0.15
+    mask_schedule: str = "stochastic"  # stochastic | deterministic
+    K_target: int = 5  # min masked evals per gene when mask_schedule=deterministic
     seed: int = 0
     student_t_df: float = 5.0
 

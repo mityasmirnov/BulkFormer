@@ -181,6 +181,8 @@ def method_config_from_dict(data: dict[str, Any]) -> MethodConfig:
         alpha=float(data.get("alpha", mult_dict.get("alpha", 0.05))),
         mc_passes=int(data.get("mc_passes", runtime.get("mc_passes", 16))),
         mask_rate=float(data.get("mask_rate", runtime.get("mask_rate", 0.15))),
+        mask_schedule=str(data.get("mask_schedule", runtime.get("mask_schedule", "stochastic"))),
+        K_target=int(data.get("K_target", runtime.get("K_target", 5))),
         seed=int(data.get("seed", runtime.get("seed", 0))),
         student_t_df=float(data.get("student_t_df", 5.0)),
     )

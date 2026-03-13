@@ -111,12 +111,26 @@ def train_tissue_classifier(
     sample_embeddings: np.ndarray,
     labels: np.ndarray | list[str],
     *,
+    classifier_type: str = "random_forest",
     pca_components: int | None = None,
     n_estimators: int = DEFAULT_N_ESTIMATORS,
     max_depth: int | None = None,
     random_seed: int = 0,
 ) -> TrainedTissueClassifier:
-    """Fit an optional PCA plus RandomForest classifier on sample embeddings."""
+    """Fit an optional PCA plus classifier on sample embeddings.
+
+    Args:
+        sample_embeddings: (n_samples, n_features) embedding matrix.
+        labels: Tissue labels per sample.
+        classifier_type: "random_forest" (default) or "tabpfn" (few-shot friendly).
+        pca_components: Optional PCA dimensionality reduction.
+        n_estimators: For random_forest only.
+        max_depth: For random_forest only.
+        random_seed: Random seed.
+
+    Returns:
+        TrainedTissueClassifier with pipeline and metrics.
+    """
     features = np.asarray(sample_embeddings, dtype=np.float32)
     resolved_labels = np.asarray(labels, dtype=object).reshape(-1)
     if features.ndim != 2:
@@ -125,7 +139,7 @@ def train_tissue_classifier(
         raise ValueError("sample_embeddings must contain at least one sample.")
     if features.shape[0] != resolved_labels.shape[0]:
         raise ValueError("sample_embeddings and labels must contain the same number of rows.")
-    if n_estimators <= 0:
+    if n_estimators <= 0 and classifier_type == "random_forest":
         raise ValueError("n_estimators must be positive.")
 
     unique_labels = np.unique(resolved_labels)
@@ -145,17 +159,27 @@ def train_tissue_classifier(
             )
         steps.append(("pca", PCA(n_components=resolved_pca_components)))
 
-    steps.append(
-        (
-            "classifier",
-            RandomForestClassifier(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                random_state=random_seed,
-                n_jobs=-1,
-            ),
+    if classifier_type == "tabpfn":
+        try:
+            from tabpfn import TabPFNClassifier
+        except ImportError as e:
+            raise ImportError(
+                "TabPFN classifier requires the tabpfn package. Install with: pip install tabpfn"
+            ) from e
+        clf = TabPFNClassifier()
+        steps.append(("classifier", clf))
+    else:
+        steps.append(
+            (
+                "classifier",
+                RandomForestClassifier(
+                    n_estimators=n_estimators,
+                    max_depth=max_depth,
+                    random_state=random_seed,
+                    n_jobs=-1,
+                ),
+            )
         )
-    )
     pipeline = Pipeline(steps)
     pipeline.fit(features, resolved_labels)
     train_predictions = pipeline.predict(features)
@@ -165,8 +189,9 @@ def train_tissue_classifier(
         "embedding_dim": int(features.shape[1]),
         "class_count": int(unique_labels.size),
         "classes": unique_labels.tolist(),
+        "classifier_type": classifier_type,
         "pca_components": resolved_pca_components,
-        "n_estimators": int(n_estimators),
+        "n_estimators": int(n_estimators) if classifier_type == "random_forest" else None,
         "max_depth": None if max_depth is None else int(max_depth),
         "train_accuracy": train_accuracy,
     }
@@ -375,9 +400,15 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         help="Sample embedding aggregation to use. Defaults to mean.",
     )
     parser.add_argument(
+        "--classifier-type",
+        choices=("random_forest", "tabpfn"),
+        default="random_forest",
+        help="Classifier backend: random_forest (default) or tabpfn (few-shot friendly).",
+    )
+    parser.add_argument(
         "--pca-components",
         type=int,
-        help="Optional PCA dimensionality applied before RandomForest training.",
+        help="Optional PCA dimensionality applied before classifier training.",
     )
     parser.add_argument(
         "--n-estimators",
@@ -454,6 +485,7 @@ def run(args: argparse.Namespace) -> int:
         trained_classifier = train_tissue_classifier(
             sample_embeddings,
             aligned_labels,
+            classifier_type=getattr(args, "classifier_type", "random_forest"),
             pca_components=args.pca_components,
             n_estimators=args.n_estimators,
             max_depth=args.max_depth,

@@ -168,6 +168,8 @@ def predict(
             loaded_model=loaded_model,
             mc_passes=method_config.mc_passes,
             mask_prob=method_config.mask_rate,
+            mask_schedule=method_config.mask_schedule,
+            K_target=method_config.K_target,
             seed=method_config.seed,
             batch_size=batch_size,
             variant=variant,
@@ -194,6 +196,8 @@ def mc_predict(
     loaded_model: Any | None = None,
     mc_passes: int = DEFAULT_MC_PASSES,
     mask_prob: float = DEFAULT_MASK_PROB,
+    mask_schedule: str = "stochastic",
+    K_target: int = 5,
     seed: int = 0,
     batch_size: int = DEFAULT_BATCH_SIZE,
     variant: str | None = None,
@@ -203,13 +207,16 @@ def mc_predict(
 ) -> tuple[ModelPredictionBundle, np.ndarray]:
     """Run MC masking passes and return predictions plus mc_samples.
 
-    Uses deterministic seeding for reproducibility. Each pass masks a random
-    subset of valid genes, runs the model, and collects predictions.
+    Uses deterministic seeding for reproducibility. When mask_schedule is
+    "deterministic", uses round-robin masking to guarantee K_target masked
+    evaluations per gene; otherwise uses stochastic masking.
 
     Args:
         bundle: Aligned expression data.
-        mc_passes: Number of MC masking passes.
+        mc_passes: Number of MC masking passes (ignored when mask_schedule=deterministic).
         mask_prob: Fraction of valid genes to mask per pass.
+        mask_schedule: "stochastic" or "deterministic".
+        K_target: Min masked evals per gene when mask_schedule=deterministic.
         seed: RNG seed for deterministic masking.
         batch_size: Batch size for forward passes.
         variant: Model variant.
@@ -221,7 +228,10 @@ def mc_predict(
         Tuple of (ModelPredictionBundle with y_hat, embedding, mc_samples) and
         mc_samples array (n_mc, n_samples, n_genes).
     """
-    from bulkformer_dx.anomaly.scoring import generate_mc_mask_plan
+    from bulkformer_dx.anomaly.scoring import (
+        generate_deterministic_mask_plan,
+        generate_mc_mask_plan,
+    )
     from bulkformer_dx.bulkformer_model import extract_sample_embeddings, predict_expression
 
     if loaded_model is not None:
@@ -243,13 +253,24 @@ def mc_predict(
         raise ValueError("At least one valid gene is required for MC prediction.")
 
     rng = np.random.default_rng(seed)
-    mask_plan = generate_mc_mask_plan(
-        valid_gene_flags,
-        sample_count=n_samples,
-        mc_passes=mc_passes,
-        mask_prob=mask_prob,
-        rng=rng,
-    )
+    if mask_schedule == "deterministic":
+        mask_plan = generate_deterministic_mask_plan(
+            valid_gene_flags,
+            sample_count=n_samples,
+            K_target=K_target,
+            mask_prob=mask_prob,
+            seed=seed,
+            rng=rng,
+        )
+        mc_passes = mask_plan.shape[1]
+    else:
+        mask_plan = generate_mc_mask_plan(
+            valid_gene_flags,
+            sample_count=n_samples,
+            mc_passes=mc_passes,
+            mask_prob=mask_prob,
+            rng=rng,
+        )
 
     MASK_TOKEN = -10.0
     mc_samples = np.full((mc_passes, n_samples, n_genes), np.nan, dtype=np.float32)

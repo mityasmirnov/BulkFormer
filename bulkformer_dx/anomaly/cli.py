@@ -101,6 +101,19 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         help="Random seed used for Monte Carlo mask generation.",
     )
     score_parser.add_argument(
+        "--mask-schedule",
+        choices=("stochastic", "deterministic"),
+        default="stochastic",
+        help="Mask schedule: stochastic (default) or deterministic (round-robin, K_target per gene).",
+    )
+    score_parser.add_argument(
+        "--K-target",
+        type=int,
+        default=5,
+        metavar="K",
+        help="Min masked evaluations per gene when --mask-schedule=deterministic. Ignored otherwise.",
+    )
+    score_parser.add_argument(
         "--score-type",
         choices=("residual", "nll"),
         default="residual",
@@ -302,6 +315,16 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         "--embedding-path",
         default=None,
         help="Path to embeddings .npy/.npz for knn_local. If omitted, loads from scores dir when NLL scoring saved them.",
+    )
+    calibrate_parser.add_argument(
+        "--metadata-path",
+        default=None,
+        help="Optional TSV with sample_id, tissue_label (and optionally batch) for heterogeneity gate. When knn_local, low entropy triggers a warning.",
+    )
+    calibrate_parser.add_argument(
+        "--force-knn-local",
+        action="store_true",
+        help="Use knn_local even when heterogeneity gate suggests global (e.g. single-tissue cohort).",
     )
     calibrate_parser.set_defaults(func=calibration.run)
 

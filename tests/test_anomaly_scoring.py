@@ -7,9 +7,41 @@ import pandas as pd
 
 from bulkformer_dx.anomaly.scoring import (
     MASK_TOKEN_VALUE,
+    generate_deterministic_mask_plan,
     generate_mc_mask_plan,
     score_expression_anomalies,
 )
+
+
+def test_generate_deterministic_mask_plan_guarantees_K_target_coverage() -> None:
+    """Deterministic plan guarantees min(masked_count) >= K_target for all valid genes."""
+    valid_gene_flags = np.array([True, False, True, True, True], dtype=bool)
+    mask_plan = generate_deterministic_mask_plan(
+        valid_gene_flags,
+        sample_count=2,
+        K_target=5,
+        mask_prob=0.5,
+        seed=42,
+    )
+    n_valid = 4
+    n_genes = 5
+    m = max(1, int(np.ceil(n_valid * 0.5)))
+    expected_passes = max(1, int(np.ceil(5 * n_valid / m)))
+    assert mask_plan.shape == (2, expected_passes, n_genes)
+    assert not mask_plan[:, :, 1].any()
+    masked_counts = mask_plan.sum(axis=1)
+    for s in range(2):
+        for g in [0, 2, 3, 4]:
+            assert masked_counts[s, g] >= 5, f"sample {s} gene {g} has {masked_counts[s, g]} < 5"
+    assert mask_plan.sum(axis=2).min() >= 1
+
+
+def test_generate_deterministic_mask_plan_reproducible() -> None:
+    """Same seed produces identical mask plans."""
+    valid = np.ones(100, dtype=bool)
+    p1 = generate_deterministic_mask_plan(valid, sample_count=3, K_target=5, mask_prob=0.10, seed=0)
+    p2 = generate_deterministic_mask_plan(valid, sample_count=3, K_target=5, mask_prob=0.10, seed=0)
+    np.testing.assert_array_equal(p1, p2)
 
 
 def test_generate_mc_mask_plan_masks_only_valid_genes() -> None:
@@ -125,6 +157,68 @@ def test_score_expression_anomalies_passes_row_consistent_mask_fraction() -> Non
         mask_prob=0.5,
         mask_plan=mask_plan,
     )
+
+
+def test_deterministic_nll_min_masked_count_ge_K_target() -> None:
+    """With deterministic mask, all scored genes have masked_count >= K_target."""
+    from bulkformer_dx.io.schemas import (
+        AlignedExpressionBundle,
+        MethodConfig,
+        ModelPredictionBundle,
+    )
+    from bulkformer_dx.scoring.pseudolikelihood import compute_mc_masked_loglikelihood_scores
+
+    n_samples, n_genes = 2, 8
+    K_target = 5
+    mask_prob = 0.5
+    n_valid = n_genes
+    m = max(1, int(np.ceil(n_valid * mask_prob)))
+    mc_passes = max(1, int(np.ceil(K_target * n_valid / m)))
+    Y = np.random.randn(n_samples, n_genes).astype(np.float32) + 5.0
+    valid_mask = np.ones((n_samples, n_genes), dtype=bool)
+    gene_ids = [f"ENSG{i}" for i in range(n_genes)]
+    sample_ids = [f"s{i}" for i in range(n_samples)]
+    bundle = AlignedExpressionBundle(
+        expr_space="log1p_tpm",
+        Y_obs=Y,
+        valid_mask=valid_mask,
+        gene_ids=gene_ids,
+        sample_ids=sample_ids,
+        counts=None,
+        gene_length_kb=None,
+        tpm_scaling_S=None,
+        metadata=None,
+    )
+    mc_samples = np.random.randn(mc_passes, n_samples, n_genes).astype(np.float32) + 5.0
+    preds = ModelPredictionBundle(
+        y_hat=Y,
+        sigma_hat=None,
+        embedding=None,
+        mc_samples=mc_samples,
+    )
+    config = MethodConfig(
+        method_id="nll_det",
+        space="log1p_tpm",
+        mc_passes=mc_passes,
+        mask_rate=mask_prob,
+        mask_schedule="deterministic",
+        K_target=K_target,
+        seed=0,
+        distribution_family="gaussian",
+        uncertainty_source="cohort_sigma",
+    )
+    ranked, cohort = compute_mc_masked_loglikelihood_scores(
+        bundle, preds, config=config
+    )
+    for sample_id, df in ranked.items():
+        if df.empty:
+            continue
+        masked_counts = df["diagnostics_json"].apply(
+            lambda x: x.get("masked_count", 0) if isinstance(x, dict) else 0
+        )
+        assert (masked_counts >= K_target).all(), (
+            f"sample {sample_id}: min masked_count {int(masked_counts.min())} < K_target {K_target}"
+        )
 
 
 def test_finite_anomaly_scores() -> None:

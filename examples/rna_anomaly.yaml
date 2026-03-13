@@ -7,6 +7,7 @@ bulkformer:
 anomaly:
   mc_passes: 16
   mask_prob: 0.15
+  # For NLL with uniform coverage: mc_passes: 50, mask_prob: 0.10, mask_schedule: deterministic, K_target: 5
   output_dir: anomaly_out
 calibration:
   output_dir: anomaly_calibrated

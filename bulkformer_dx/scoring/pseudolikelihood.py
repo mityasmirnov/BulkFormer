@@ -8,7 +8,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from bulkformer_dx.anomaly.scoring import generate_mc_mask_plan
+from bulkformer_dx.anomaly.scoring import (
+    generate_deterministic_mask_plan,
+    generate_mc_mask_plan,
+)
 from bulkformer_dx.io.schemas import (
     AlignedExpressionBundle,
     GeneOutlierRow,
@@ -54,6 +57,8 @@ def compute_mc_masked_loglikelihood_scores(
     mask_plan: np.ndarray | None = None,
     mc_passes: int = 16,
     mask_prob: float = 0.15,
+    mask_schedule: str = "stochastic",
+    K_target: int = 5,
     seed: int = 0,
     distribution: str = "gaussian",
     uncertainty_source: str = "cohort_sigma",
@@ -89,6 +94,8 @@ def compute_mc_masked_loglikelihood_scores(
         distribution = config.distribution_family
         uncertainty_source = config.uncertainty_source
         student_t_df = config.student_t_df
+        mask_schedule = config.mask_schedule
+        K_target = config.K_target
 
     Y = np.asarray(bundle.Y_obs, dtype=float)
     n_samples, n_genes = Y.shape
@@ -97,6 +104,8 @@ def compute_mc_masked_loglikelihood_scores(
     sample_ids = bundle.sample_ids
     mc_samples = np.asarray(preds.mc_samples, dtype=float)
 
+    if mask_schedule == "deterministic":
+        mc_passes = mc_samples.shape[0]
     if mc_samples.shape[0] != mc_passes:
         raise ValueError(
             f"mc_samples first dim {mc_samples.shape[0]} != mc_passes {mc_passes}."
@@ -104,13 +113,23 @@ def compute_mc_masked_loglikelihood_scores(
 
     rng = np.random.default_rng(seed)
     if mask_plan is None:
-        mask_plan = generate_mc_mask_plan(
-            valid_flags,
-            sample_count=n_samples,
-            mc_passes=mc_passes,
-            mask_prob=mask_prob,
-            rng=rng,
-        )
+        if mask_schedule == "deterministic":
+            mask_plan = generate_deterministic_mask_plan(
+                valid_flags,
+                sample_count=n_samples,
+                K_target=K_target,
+                mask_prob=mask_prob,
+                seed=seed,
+                rng=rng,
+            )
+        else:
+            mask_plan = generate_mc_mask_plan(
+                valid_flags,
+                sample_count=n_samples,
+                mc_passes=mc_passes,
+                mask_prob=mask_prob,
+                rng=rng,
+            )
 
     # Residuals for cohort_sigma
     residuals_by_gene = _collect_masked_residuals_by_gene(

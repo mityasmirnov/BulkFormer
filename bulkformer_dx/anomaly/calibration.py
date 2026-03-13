@@ -866,25 +866,49 @@ def run(args: argparse.Namespace) -> int:
     knn_k = getattr(args, "knn_k", 50)
     embeddings = None
     if cohort_mode == "knn_local":
-        embedding_path = getattr(args, "embedding_path", None)
-        if embedding_path is not None:
-            embeddings = load_embeddings_from_path(Path(embedding_path), sample_ids)
-        if embeddings is None:
-            loaded = load_embeddings_from_scores_dir(scores_path)
-            if loaded is not None:
-                emb_arr, emb_sample_ids = loaded
-                idx_map = {s: i for i, s in enumerate(emb_sample_ids)}
-                if all(s in idx_map for s in sample_ids):
-                    embeddings = np.array(
-                        [emb_arr[idx_map[s]] for s in sample_ids],
-                        dtype=np.float32,
+        metadata_path = getattr(args, "metadata_path", None)
+        force_knn_local = getattr(args, "force_knn_local", False)
+        if metadata_path is not None and not force_knn_local:
+            meta_df = pd.read_csv(metadata_path, sep="\t")
+            tissue_labels = None
+            batch_labels = None
+            if "sample_id" in meta_df.columns and "tissue_label" in meta_df.columns:
+                tissue_labels = meta_df.set_index("sample_id")["tissue_label"].reindex(sample_ids).dropna()
+            if "sample_id" in meta_df.columns and "batch" in meta_df.columns:
+                batch_labels = meta_df.set_index("sample_id")["batch"].reindex(sample_ids).dropna()
+            if tissue_labels is not None or batch_labels is not None:
+                from bulkformer_dx.stats.heterogeneity import suggest_knn_local
+                recommend, reason = suggest_knn_local(
+                    tissue_labels=tissue_labels if tissue_labels is not None else None,
+                    batch_labels=batch_labels if batch_labels is not None else None,
+                )
+                if not recommend:
+                    _logger.warning(
+                        "Heterogeneity gate: kNN-local may be inappropriate. %s "
+                        "Consider --cohort-mode global or use --force-knn-local to override.",
+                        reason,
                     )
-        if embeddings is None:
-            raise ValueError(
-                "cohort_mode knn_local requires embeddings. Either provide --embedding-path "
-                "pointing to a .npy/.npz file, or run calibration on NLL scoring output "
-                "(anomaly score --score-type nll) which saves embeddings to the scores directory."
-            )
+                    cohort_mode = "global"
+        if cohort_mode == "knn_local":
+            embedding_path = getattr(args, "embedding_path", None)
+            if embedding_path is not None:
+                embeddings = load_embeddings_from_path(Path(embedding_path), sample_ids)
+            if embeddings is None:
+                loaded = load_embeddings_from_scores_dir(scores_path)
+                if loaded is not None:
+                    emb_arr, emb_sample_ids = loaded
+                    idx_map = {s: i for i, s in enumerate(emb_sample_ids)}
+                    if all(s in idx_map for s in sample_ids):
+                        embeddings = np.array(
+                            [emb_arr[idx_map[s]] for s in sample_ids],
+                            dtype=np.float32,
+                        )
+            if embeddings is None:
+                raise ValueError(
+                    "cohort_mode knn_local requires embeddings. Either provide --embedding-path "
+                    "pointing to a .npy/.npz file, or run calibration on NLL scoring output "
+                    "(anomaly score --score-type nll) which saves embeddings to the scores directory."
+                )
     result = calibrate_ranked_gene_scores(
         ranked_gene_scores,
         count_space_method=args.count_space_method,

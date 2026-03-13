@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from bulkformer_dx.anomaly.scoring import (
+    generate_deterministic_mask_plan,
     generate_mc_mask_plan,
     resolve_valid_gene_flags,
     score_expression_anomalies,
@@ -61,6 +62,11 @@ def compute_residual_scores(
         mc_passes = config.mc_passes
         mask_prob = config.mask_rate
         seed = config.seed
+        mask_schedule = config.mask_schedule
+        K_target = config.K_target
+    else:
+        mask_schedule = "stochastic"
+        K_target = 5
 
     Y = np.asarray(bundle.Y_obs, dtype=float)
     n_samples, n_genes = Y.shape
@@ -68,15 +74,29 @@ def compute_residual_scores(
     gene_ids = bundle.gene_ids
     sample_ids = bundle.sample_ids
 
+    if preds.mc_samples is not None and mask_schedule == "deterministic":
+        mc_passes = preds.mc_samples.shape[0]
+
     rng = np.random.default_rng(seed)
     if mask_plan is None:
-        mask_plan = generate_mc_mask_plan(
-            valid_flags,
-            sample_count=n_samples,
-            mc_passes=mc_passes,
-            mask_prob=mask_prob,
-            rng=rng,
-        )
+        if mask_schedule == "deterministic":
+            mask_plan = generate_deterministic_mask_plan(
+                valid_flags,
+                sample_count=n_samples,
+                K_target=K_target,
+                mask_prob=mask_prob,
+                seed=seed,
+                rng=rng,
+            )
+            mc_passes = mask_plan.shape[1]
+        else:
+            mask_plan = generate_mc_mask_plan(
+                valid_flags,
+                sample_count=n_samples,
+                mc_passes=mc_passes,
+                mask_prob=mask_prob,
+                rng=rng,
+            )
 
     # If we have mc_samples, use them; else replicate y_hat
     if preds.mc_samples is not None and preds.mc_samples.shape[0] == mc_passes:

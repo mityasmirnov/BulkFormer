@@ -175,6 +175,71 @@ def generate_mc_mask_plan(
     return mask_plan
 
 
+def generate_deterministic_mask_plan(
+    valid_gene_flags: np.ndarray,
+    *,
+    sample_count: int,
+    K_target: int = 5,
+    mask_prob: float = 0.10,
+    seed: int = 0,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """Create a deterministic round-robin mask plan with uniform per-gene coverage.
+
+    Guarantees at least K_target masked evaluations per valid gene per sample,
+    reproducible given seed. Uses round-robin chunking to avoid the
+    "some genes got 0-1 hits" pathology of stochastic masking.
+
+    Shape contract:
+    - output: `(n_samples, mc_passes, n_genes)` boolean mask
+    - `True` entries indicate genes masked during a given MC pass
+    - min(masked_count per valid gene) >= K_target
+
+    Args:
+        valid_gene_flags: 1D boolean array, True for valid genes.
+        sample_count: Number of samples.
+        K_target: Minimum masked evaluations per gene (default 5).
+        mask_prob: Fraction of valid genes masked per pass (e.g. 0.07-0.10).
+        seed: RNG seed for per-sample gene permutation.
+        rng: Optional RNG; if None, uses np.random.default_rng(seed).
+
+    Returns:
+        Boolean mask (n_samples, mc_passes, n_genes).
+    """
+    valid_gene_flags = np.asarray(valid_gene_flags, dtype=bool)
+    if valid_gene_flags.ndim != 1:
+        raise ValueError("Valid gene flags must be a 1D boolean array.")
+    if sample_count <= 0:
+        raise ValueError("Sample count must be positive.")
+    if K_target <= 0:
+        raise ValueError("K_target must be positive.")
+    if not 0 < mask_prob <= 1:
+        raise ValueError("Mask probability must be in the interval (0, 1].")
+
+    valid_gene_indices = np.flatnonzero(valid_gene_flags)
+    n_valid = int(valid_gene_indices.size)
+    if n_valid == 0:
+        raise ValueError("At least one valid BulkFormer gene is required for anomaly scoring.")
+
+    m = max(1, int(np.ceil(n_valid * mask_prob)))
+    mc_passes = max(1, int(np.ceil(K_target * n_valid / m)))
+    n_genes = valid_gene_flags.shape[0]
+
+    if rng is None:
+        rng = np.random.default_rng(seed)
+
+    mask_plan = np.zeros((sample_count, mc_passes, n_genes), dtype=bool)
+    for sample_idx in range(sample_count):
+        permuted = rng.permutation(valid_gene_indices)
+        for t in range(mc_passes):
+            start = (t * m) % n_valid
+            for i in range(m):
+                idx = (start + i) % n_valid
+                gene_idx = int(permuted[idx])
+                mask_plan[sample_idx, t, gene_idx] = True
+    return mask_plan
+
+
 def _validate_mask_plan(
     mask_plan: np.ndarray,
     *,
@@ -568,11 +633,15 @@ def _run_nll(args: argparse.Namespace) -> int:
         model_kwargs["gene_info_path"] = args.gene_info_path
     loaded_model = load_bulkformer_model(**model_kwargs)
 
+    mask_schedule = getattr(args, "mask_schedule", "stochastic")
+    K_target = getattr(args, "K_target", 5)
     pred_bundle, mc_samples = mc_predict(
         bundle,
         loaded_model=loaded_model,
         mc_passes=args.mc_passes,
         mask_prob=args.mask_prob,
+        mask_schedule=mask_schedule,
+        K_target=K_target,
         seed=args.random_seed,
     )
     pred_bundle = type(pred_bundle)(
@@ -585,8 +654,10 @@ def _run_nll(args: argparse.Namespace) -> int:
     ranked_gene_scores, cohort_scores = compute_mc_masked_loglikelihood_scores(
         bundle,
         pred_bundle,
-        mc_passes=args.mc_passes,
+        mc_passes=mc_samples.shape[0],
         mask_prob=args.mask_prob,
+        mask_schedule=mask_schedule,
+        K_target=K_target,
         seed=args.random_seed,
     )
 
@@ -599,17 +670,23 @@ def _run_nll(args: argparse.Namespace) -> int:
     # Validate all NLL scores are finite before writing
     assert_finite_scores(ranked_gene_scores, score_column="anomaly_score")
 
+    actual_mc_passes = mc_samples.shape[0]
     cohort_rows = []
+    min_masked_overall = float("inf")
+    max_masked_overall = 0.0
     for sample_id, df in ranked_gene_scores.items():
         if df.empty:
             cohort_rows.append({
                 "sample_id": sample_id,
                 "mean_abs_residual": np.nan,
                 "valid_gene_count": valid_gene_count,
-                "mc_passes": args.mc_passes,
+                "mc_passes": actual_mc_passes,
                 "masked_observations": 0,
                 "genes_scored": 0,
                 "gene_coverage_fraction": 0.0,
+                "min_masked_count": np.nan,
+                "median_masked_count": np.nan,
+                "max_masked_count": np.nan,
                 "rmse": np.nan,
                 "median_gene_score": np.nan,
             })
@@ -624,11 +701,15 @@ def _run_nll(args: argparse.Namespace) -> int:
         compat["rmse"] = np.nan
         if "diagnostics_json" in compat.columns:
             compat["masked_count"] = compat["diagnostics_json"].apply(
-                lambda x: x.get("masked_count", args.mc_passes) if isinstance(x, dict) else args.mc_passes
+                lambda x: x.get("masked_count", actual_mc_passes) if isinstance(x, dict) else actual_mc_passes
             )
         else:
-            compat["masked_count"] = args.mc_passes
-        compat["coverage_fraction"] = compat["masked_count"] / args.mc_passes
+            compat["masked_count"] = actual_mc_passes
+        masked_counts = compat["masked_count"]
+        min_m, med_m, max_m = int(masked_counts.min()), float(masked_counts.median()), int(masked_counts.max())
+        min_masked_overall = min(min_masked_overall, min_m)
+        max_masked_overall = max(max_masked_overall, max_m)
+        compat["coverage_fraction"] = compat["masked_count"] / actual_mc_passes
         masked_obs = int(compat["masked_count"].sum())
         compat = compat[
             ["ensg_id", "anomaly_score", "mean_signed_residual", "rmse", "masked_count",
@@ -639,10 +720,13 @@ def _run_nll(args: argparse.Namespace) -> int:
             "sample_id": sample_id,
             "mean_abs_residual": float(df["score_gene"].mean()),
             "valid_gene_count": valid_gene_count,
-            "mc_passes": args.mc_passes,
+            "mc_passes": actual_mc_passes,
             "masked_observations": masked_obs,
             "genes_scored": len(df),
             "gene_coverage_fraction": len(df) / max(valid_gene_count, 1),
+            "min_masked_count": min_m,
+            "median_masked_count": med_m,
+            "max_masked_count": max_m,
             "rmse": np.nan,
             "median_gene_score": float(df["score_gene"].median()),
         })
@@ -662,12 +746,23 @@ def _run_nll(args: argparse.Namespace) -> int:
     })
     gene_qc.to_csv(output_dir / "gene_qc.tsv", sep="\t", index=False)
 
+    mask_coverage_details = {}
+    if min_masked_overall != float("inf") and max_masked_overall >= 0:
+        med_vals = [r.get("median_masked_count") for r in cohort_rows if r.get("median_masked_count") is not None]
+        mask_coverage_details = {
+            "min_masked_count": int(min_masked_overall),
+            "median_masked_count": float(np.median(med_vals)) if med_vals else None,
+            "max_masked_count": int(max_masked_overall),
+        }
     run_metadata = {
         "samples": len(bundle.sample_ids),
         "genes": len(bundle.gene_ids),
         "valid_gene_count": valid_gene_count,
-        "mc_passes": args.mc_passes,
+        "mc_passes": actual_mc_passes,
         "mask_prob": args.mask_prob,
+        "mask_schedule": mask_schedule,
+        "K_target": K_target,
+        "mask_coverage_details": mask_coverage_details,
         "score_type": "nll",
     }
     with (output_dir / "anomaly_run.json").open("w", encoding="utf-8") as handle:
@@ -680,7 +775,7 @@ def _run_nll(args: argparse.Namespace) -> int:
         "score_type: nll".format(
             samples=run_metadata["samples"],
             valid_genes=valid_gene_count,
-            mc_passes=args.mc_passes,
+            mc_passes=actual_mc_passes,
         )
     )
     return 0

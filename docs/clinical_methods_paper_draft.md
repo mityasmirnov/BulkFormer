@@ -291,6 +291,8 @@ The anomaly scoring stage processes samples in batches. The batch size (default 
 ### 4.5 Valid Gene Mask and Coverage
 The `valid_gene_mask.tsv` distinguishes genes observed in the user data from genes inserted only to match the BulkFormer vocabulary. Genes absent from the input are filled with −10 and flagged `is_valid=0`; NB-Outrider and other count-space methods apply only to `is_valid=1` genes. Mean gene coverage fraction (fraction of valid genes masked at least once per sample) is typically ~0.92–0.93 with 16 MC passes and mask prob 0.15. The `gene_qc.tsv` output reports per-gene mask coverage and residual summaries across the cohort for quality control.
 
+**Deterministic mask schedule**: For NLL scoring, stochastic masking can leave some genes with 0–1 masked evaluations, producing noisy or missing scores. The pipeline supports `--mask-schedule deterministic` with `--K-target 5`, which uses round-robin chunking to guarantee at least K_target masked evaluations per valid gene per sample. With mask_prob 0.10 and K_target 5, mc_passes is computed as $\lceil K \cdot n_{valid} / m \rceil$ (e.g., ~50 passes for ~20k genes). This yields uniform coverage and stable NLL scores. Use `--mask-schedule deterministic` for production NLL workflows.
+
 ### 4.6 Score Types: Residual vs NLL
 The default anomaly score is **residual** (mean absolute residual over MC passes). The **NLL** score type (`--score-type nll`) instead accumulates log-probabilities under a chosen distribution (Gaussian, Student-t, or NB when counts exist). NLL scoring requires specifying `distribution` and `uncertainty_source`; it produces per-gene NLL scores that can be calibrated empirically or used for density-based ranking. The residual path is simpler and is the default for most use cases; NLL is useful when the model's uncertainty (e.g., from a sigma head) is of interest. Both score types use the same MC mask plan; only the aggregation differs (MAR vs mean NLL).
 
@@ -356,7 +358,9 @@ This method creates a "local cohort" for each sample to reduce confounding from 
 
 4.  **Utility**: Extremely effective at neutralizing batch effects or tissue-specific background shifts.
 
-*   **Implementation**: `anomaly calibrate --scores <dir> --output-dir <out> --cohort-mode knn_local --knn-k 50 --input <aligned_log1p_tpm> --embedding-path <sample_embeddings.npy> --alpha 0.05`. Embeddings must be extracted first via `embeddings extract`.
+*   **Heterogeneity gate**: kNN-Local is designed for heterogeneous cohorts (multi-tissue, batch effects). On homogeneous cohorts (e.g., single-tissue fibroblasts), it can fail (0 recall, inflated outliers). The pipeline includes an optional heterogeneity gate: when `--metadata-path` points to a TSV with `sample_id`, `tissue_label` (and optionally `batch`), low tissue or batch entropy triggers a warning and auto-fallback to global calibration unless `--force-knn-local` is set.
+
+*   **Implementation**: `anomaly calibrate --scores <dir> --output-dir <out> --cohort-mode knn_local --knn-k 50 --input <aligned_log1p_tpm> --embedding-path <sample_embeddings.npy> --alpha 0.05`. Embeddings must be extracted first via `embeddings extract`. Use `--metadata-path` for the heterogeneity gate; add `--force-knn-local` to override.
 
 ### 5.5 Framework E: NLL Scoring (TabPFN-Style Pseudo-Likelihood)
 
