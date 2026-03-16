@@ -101,7 +101,30 @@ def _resolve_ranked_dir(scores_path: Path) -> Path:
     )
 
 
+def _normalize_ranked_table(table: pd.DataFrame) -> pd.DataFrame:
+    """Normalize NLL-style or residual-style columns to required format."""
+    df = table.copy()
+    # Map NLL-style column names to required format
+    renames = {}
+    if "gene_id" in df.columns and "ensg_id" not in df.columns:
+        renames["gene_id"] = "ensg_id"
+    if "score_gene" in df.columns and "anomaly_score" not in df.columns:
+        renames["score_gene"] = "anomaly_score"
+    if "y_obs" in df.columns and "observed_expression" not in df.columns:
+        renames["y_obs"] = "observed_expression"
+    if "y_hat" in df.columns and "mean_predicted_expression" not in df.columns:
+        renames["y_hat"] = "mean_predicted_expression"
+    if "residual" in df.columns and "mean_signed_residual" not in df.columns:
+        renames["residual"] = "mean_signed_residual"
+    if renames:
+        df = df.rename(columns=renames)
+    if "mean_signed_residual" not in df.columns and "residual" in df.columns:
+        df["mean_signed_residual"] = df["residual"]
+    return df
+
+
 def _validate_ranked_gene_table(table: pd.DataFrame, *, sample_id: str) -> pd.DataFrame:
+    table = _normalize_ranked_table(table)
     missing_columns = REQUIRED_RANKED_COLUMNS - set(table.columns)
     if missing_columns:
         missing_list = ", ".join(sorted(missing_columns))

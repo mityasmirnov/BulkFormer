@@ -19,8 +19,7 @@ python -m bulkformer_dx.cli anomaly score \
   --variant "${VARIANT}" \
   --device cuda \
   --batch-size 4 \
-  --mc-passes 8 \
-  --mask-prob 0.15
+  --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 
 # 2. Calibrate (stricter alpha)
 python -m bulkformer_dx.cli anomaly calibrate \

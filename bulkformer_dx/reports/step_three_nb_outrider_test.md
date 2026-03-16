@@ -35,7 +35,7 @@ Clamped to [0, 1]. Uses NB parameterization with mean μ and size = 1/α (Var = 
 
 ### Caching
 
-Dispersion parameters are cached in `nb_params.parquet` and `nb_params_metadata.json` under the cache directory (default: `output_dir/nb_params_cache/`).
+Dispersion parameters are cached in `nb_params.tsv` and `nb_params_metadata.json` under the cache directory (default: `output_dir/nb_params_cache/`).
 
 ### Calibration Wiring
 

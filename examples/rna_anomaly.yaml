@@ -5,9 +5,10 @@ bulkformer:
   variant: 37M
   device: cpu
 anomaly:
-  mc_passes: 16
-  mask_prob: 0.15
-  # For NLL with uniform coverage: mc_passes: 50, mask_prob: 0.10, mask_schedule: deterministic, K_target: 5
+  mask_schedule: deterministic
+  K_target: 5
+  mask_prob: 0.10
+  # 100% gene coverage; mc_passes auto-computed (~50 for ~20k genes)
   output_dir: anomaly_out
 calibration:
   output_dir: anomaly_calibrated

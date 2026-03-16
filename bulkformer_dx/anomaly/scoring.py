@@ -6,11 +6,14 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 import re
 from typing import Any
 
 import numpy as np
+
+_logger = logging.getLogger(__name__)
 import pandas as pd
 
 from bulkformer_dx.bulkformer_model import load_bulkformer_model, predict_expression
@@ -667,9 +670,7 @@ def _run_nll(args: argparse.Namespace) -> int:
     ranked_dir.mkdir(parents=True, exist_ok=True)
     valid_gene_count = int(valid_flags.sum())
 
-    # Validate all NLL scores are finite before writing
-    assert_finite_scores(ranked_gene_scores, score_column="anomaly_score")
-
+    # NLL can produce nan for genes with 0 masked evals (stochastic masking). Filter before writing.
     actual_mc_passes = mc_samples.shape[0]
     cohort_rows = []
     min_masked_overall = float("inf")
@@ -715,6 +716,32 @@ def _run_nll(args: argparse.Namespace) -> int:
             ["ensg_id", "anomaly_score", "mean_signed_residual", "rmse", "masked_count",
              "coverage_fraction", "observed_expression", "mean_predicted_expression"]
         ]
+        finite_mask = np.isfinite(compat["anomaly_score"])
+        n_dropped = (~finite_mask).sum()
+        if n_dropped > 0:
+            _logger.warning(
+                "Sample %s: dropping %d genes with non-finite NLL (0 masked evals). "
+                "Use --mask-schedule deterministic for 100%% coverage.",
+                sample_id, int(n_dropped),
+            )
+            compat = compat.loc[finite_mask].copy()
+        if len(compat) == 0:
+            _logger.warning("Sample %s: no finite NLL scores; skipping ranked file.", sample_id)
+            cohort_rows.append({
+                "sample_id": sample_id,
+                "mean_abs_residual": np.nan,
+                "valid_gene_count": valid_gene_count,
+                "mc_passes": actual_mc_passes,
+                "masked_observations": 0,
+                "genes_scored": 0,
+                "gene_coverage_fraction": 0.0,
+                "min_masked_count": np.nan,
+                "median_masked_count": np.nan,
+                "max_masked_count": np.nan,
+                "rmse": np.nan,
+                "median_gene_score": np.nan,
+            })
+            continue
         compat.to_csv(ranked_dir / f"{_sanitize_filename(sample_id)}.tsv", sep="\t", index=False)
         cohort_rows.append({
             "sample_id": sample_id,

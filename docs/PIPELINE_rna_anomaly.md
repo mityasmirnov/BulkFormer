@@ -31,7 +31,8 @@ python -m bulkformer_dx.cli anomaly score \
   --valid-gene-mask preprocess_out/valid_gene_mask.tsv \
   --output-dir anomaly_out \
   --variant 37M \
-  --device cpu
+  --device cpu \
+  --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 ```
 
 ## 3. Train The Optional Small Head

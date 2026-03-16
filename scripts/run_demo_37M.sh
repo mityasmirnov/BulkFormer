@@ -26,7 +26,7 @@ $PY -m bulkformer_dx.cli anomaly score \
   --input runs/demo_preprocess_37M/aligned_log1p_tpm.tsv \
   --valid-gene-mask runs/demo_preprocess_37M/valid_gene_mask.tsv \
   --output-dir runs/demo_anomaly_score_37M \
-  --variant 37M --device cuda --mc-passes 16 --mask-prob 0.15
+  --variant 37M --device cuda --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 
 # 4. Calibrate (base)
 $PY -m bulkformer_dx.cli anomaly calibrate \
@@ -39,7 +39,7 @@ $PY -m bulkformer_dx.cli anomaly score \
   --input runs/demo_spike_37M/aligned_log1p_tpm_spiked.tsv \
   --valid-gene-mask runs/demo_preprocess_37M/valid_gene_mask.tsv \
   --output-dir runs/demo_spike_anomaly_score_37M \
-  --variant 37M --device cuda --mc-passes 16 --mask-prob 0.15
+  --variant 37M --device cuda --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 
 # 6. Calibrate (spiked)
 $PY -m bulkformer_dx.cli anomaly calibrate \

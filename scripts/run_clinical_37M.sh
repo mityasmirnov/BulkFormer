@@ -20,7 +20,7 @@ python -m bulkformer_dx.cli anomaly score \
   --input runs/clinical_preprocess_37M/aligned_log1p_tpm.tsv \
   --valid-gene-mask runs/clinical_preprocess_37M/valid_gene_mask.tsv \
   --output-dir runs/clinical_anomaly_score_37M \
-  --variant 37M --device cuda --mc-passes 16 --mask-prob 0.15
+  --variant 37M --device cuda --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 
 # 3. Calibrate
 python -m bulkformer_dx.cli anomaly calibrate \

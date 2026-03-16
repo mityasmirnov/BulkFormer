@@ -170,8 +170,7 @@ conda run -n bulkformer-cuda python -m bulkformer_dx.cli anomaly score \
   --output-dir runs/demo_anomaly_score_37M \
   --variant 37M \
   --device cuda \
-  --mc-passes 16 \
-  --mask-prob 0.15
+  --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 ```
 
 Calibration:

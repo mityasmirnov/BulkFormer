@@ -20,7 +20,7 @@ from bulkformer_dx.stats.dispersion import (
 )
 from bulkformer_dx.stats.nb import outrider_two_sided_nb_pvalue
 
-NB_PARAMS_CACHE_FILENAME = "nb_params.parquet"
+NB_PARAMS_CACHE_FILENAME = "nb_params.tsv"
 NB_PARAMS_METADATA_FILENAME = "nb_params_metadata.json"
 MEAN_EPS = 1e-8
 DISPERSION_EPS = 1e-10
@@ -139,7 +139,7 @@ def _load_or_fit_dispersions(
 
     if cache_path is not None and cache_path.exists():
         try:
-            cached = pd.read_parquet(cache_path)
+            cached = pd.read_csv(cache_path, sep="\t")
             if "ensg_id" in cached.columns and "alpha" in cached.columns:
                 cached = cached.set_index("ensg_id")
                 alpha_arr = np.array(
@@ -168,7 +168,7 @@ def _load_or_fit_dispersions(
                 "size": result["size"],
             }
         )
-        df.to_parquet(cache_path, index=False)
+        df.to_csv(cache_path, sep="\t", index=False)
         meta = {
             "dispersion_method": dispersion_method,
             "use_shrinkage": use_shrinkage,

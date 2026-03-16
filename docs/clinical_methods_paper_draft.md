@@ -1077,8 +1077,7 @@ python -m bulkformer_dx.cli anomaly score \
   --output-dir anomaly_out \
   --variant 37M \
   --device cuda \
-  --mc-passes 20 \
-  --mask-prob 0.15
+  --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 ```
 
 ### Anomaly Calibrate (Gaussian/Student-t)
@@ -1335,7 +1334,7 @@ python -m bulkformer_dx.cli anomaly score \
   --input runs/clinical_preprocess_37M/aligned_log1p_tpm.tsv \
   --valid-gene-mask runs/clinical_preprocess_37M/valid_gene_mask.tsv \
   --output-dir runs/clinical_anomaly_score_37M \
-  --variant 37M --device cuda --mc-passes 16 --mask-prob 0.15
+  --variant 37M --device cuda --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 
 # Calibrate
 python -m bulkformer_dx.cli anomaly calibrate \
@@ -1416,7 +1415,7 @@ Before running the pipeline, verify:
 Pipeline steps (in order):
 
 1.  Preprocess: `preprocess --counts ... --annotation ... --output-dir ... --counts-orientation genes-by-samples`
-2.  Anomaly score: `anomaly score --input ... --valid-gene-mask ... --output-dir ... --variant 37M --mc-passes 16 --mask-prob 0.15`
+2.  Anomaly score: `anomaly score --input ... --valid-gene-mask ... --output-dir ... --variant 37M --mask-schedule deterministic --K-target 5 --mask-prob 0.10`
 3.  Calibrate: `anomaly calibrate --scores ... --output-dir ... --alpha 0.05` (add `--count-space-method nb_outrider --count-space-path <preprocess_dir>` for NB-Outrider)
 4.  (Optional) Embeddings: `embeddings extract` for kNN-Local calibration
 5.  (Optional) Spike-in: Run `scripts/demo_spike_inject.py` and `scripts/spike_recovery_metrics.py` for validation
@@ -1547,7 +1546,7 @@ Before deploying BulkFormer-DX in a clinical or production setting, run the foll
 *   **Empty ranked_genes**: If `ranked_genes/` is empty or missing samples, check that the input and valid_gene_mask have matching sample IDs. Ensure at least one valid gene exists.
 *   **NB dispersion fitting fails**: Some genes may have zero or near-zero expected counts; dispersion fitting can fail. The implementation uses fallbacks (e.g., global dispersion); check logs for warnings.
 *   **kNN embedding dimension mismatch**: The embedding matrix must have the same number of rows as samples in the scores. Ensure embedding extraction used the same preprocess output and sample order.
-*   **CUDA out of memory**: Reduce `--batch-size` (e.g., 4 for 147M). Reduce `--mc-passes` if necessary. Use CPU with `--device cpu` as fallback.
+*   **CUDA out of memory**: Reduce `--batch-size` (e.g., 4 for 147M). With deterministic masking, mc_passes is auto-computed; reduce batch size first. Use CPU with `--device cpu` as fallback.
 *   **Slow calibration**: NB-Outrider dispersion fitting is O(genes × samples); for large cohorts, expect ~2 min. Gaussian/Student-t are sub-second. Cache is reused across runs.
 *   **Preprocess fails on gene IDs**: Ensure annotation uses the same ID format as counts (Ensembl with or without version). Strip versions consistently. Check for duplicate gene IDs in annotation.
 
@@ -1683,7 +1682,7 @@ python -m bulkformer_dx.cli anomaly score \
   --input runs/clinical_preprocess_37M/aligned_log1p_tpm.tsv \
   --valid-gene-mask runs/clinical_preprocess_37M/valid_gene_mask.tsv \
   --output-dir runs/clinical_anomaly_score_37M \
-  --variant 37M --device cuda --mc-passes 16 --mask-prob 0.15
+  --variant 37M --device cuda --mask-schedule deterministic --K-target 5 --mask-prob 0.10
 ```
 
 **Calibrate (Gaussian)**:
@@ -1873,7 +1872,7 @@ Cause: Student-t is conservative; when the model is well-aligned, residuals are 
 Cause: Gene ID mismatch between counts and annotation. Fix: Ensure both use the same format (Ensembl with or without version). Strip versions consistently. Check for duplicate gene IDs in annotation. Verify the annotation has the required columns (gene_id, length or start/end).
 
 **Scenario 6: "CUDA out of memory with 147M"**  
-Cause: Batch size or mc_passes too large. Fix: Use `--batch-size 4` or smaller. Reduce `--mc-passes` to 8. Use `--device cpu` as fallback (slower but works).
+Cause: Batch size or mc_passes too large. Fix: Use `--batch-size 4` or smaller. With deterministic masking, mc_passes is auto-computed; reduce batch size. Use `--device cpu` as fallback (slower but works).
 
 **Scenario 7: "Spike-in shows negative rank improvement for some genes"**  
 Cause: The spike perturbs the gene in a direction that reduces the residual (e.g., model over-predicted, spike increases value). Fix: This is expected for a subset of injected genes. Focus on median rank improvement and the fraction of genes with positive improvement. The pipeline is still valid if the median is positive.
@@ -2118,7 +2117,7 @@ From `reports/figures/notebook_integration/{method}/variance_vs_mean.png`:
 ## Validation Protocol Summary
 
 1. **Preprocess**: Run `preprocess` with `--gene-annotation` and `--sample-annotation`. Verify `preprocess_report.json`: valid_gene_fraction ≥ 0.95, gene count ~20k.
-2. **Anomaly**: Run `anomaly` with `--mc-passes 16` and `--mask-prob 0.15`. Check `cohort_scores.tsv` for mean abs residual (typical: 0.7–0.9 for 37M).
+2. **Anomaly**: Run `anomaly` with `--mask-schedule deterministic --K-target 5 --mask-prob 0.10` (100% gene coverage). Check `cohort_scores.tsv` for mean abs residual (typical: 0.7–0.9 for 37M).
 3. **Calibration**: Run `calibrate` with chosen method. Inspect `calibration_summary.tsv` and `calibration_summary_stats_*.json`.
 4. **Figures**: Generate figures via `generate_clinical_report` or notebook. Review QQ plot, variance–mean, stratified histograms.
 5. **Spike recovery** (optional): Inject spikes, re-run pipeline, compare ranks and p-values. Target: AUROC > 0.7, rank improvement median > 1000.

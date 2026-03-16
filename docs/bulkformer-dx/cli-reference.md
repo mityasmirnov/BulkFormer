@@ -44,7 +44,9 @@ Main arguments:
 - `--device`
 - `--batch-size`
 - `--mask-prob`
-- `--mc-passes`
+- `--mc-passes` (ignored when `--mask-schedule deterministic`)
+- `--mask-schedule`: `stochastic` (default) or `deterministic` (100% gene coverage)
+- `--K-target`: min masked evals per gene when deterministic (default 5)
 
 Outputs:
 
