@@ -119,6 +119,13 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         default="residual",
         help="Scoring method: residual (MC mean abs residual) or nll (TabPFN-style pseudo-likelihood).",
     )
+    score_parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Save mc_samples checkpoint every N passes (NLL only). 0 to disable.",
+    )
     score_parser.set_defaults(func=scoring.run)
 
     head_parser = anomaly_subparsers.add_parser(

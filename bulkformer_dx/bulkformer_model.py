@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 from model.config import get_model_params, normalize_model_variant
 
@@ -412,8 +413,15 @@ def _run_batches(
     tensor = expression_to_tensor(expression, device=target_device)
     outputs: list[torch.Tensor] = []
 
+    n_batches = (tensor.shape[0] + batch_size - 1) // batch_size
     with torch.inference_mode():
-        for start_idx in range(0, tensor.shape[0], batch_size):
+        for start_idx in tqdm(
+            range(0, tensor.shape[0], batch_size),
+            total=n_batches,
+            desc="Batches",
+            unit="batch",
+            leave=False,
+        ):
             batch = tensor[start_idx : start_idx + batch_size]
             batch_output = model(batch, mask_prob=mask_prob, output_expr=output_expr)
             outputs.append(batch_output.detach().cpu())

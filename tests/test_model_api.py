@@ -170,6 +170,27 @@ def test_mc_predict_populates_sigma_hat_when_multiple_passes() -> None:
     np.testing.assert_array_less(0, pred_bundle.sigma_hat)
 
 
+def test_mc_predict_calls_progress_callback() -> None:
+    """progress_callback is invoked each pass with (pass_idx, total)."""
+    bundle = _make_bundle(n_samples=2, n_genes=6)
+    model = _DummyBulkFormer()
+    loaded = _LoadedModel(model=model, device=torch.device("cpu"))
+    calls: list[tuple[int, int]] = []
+
+    pred_bundle, mc_samples = mc_predict(
+        bundle,
+        loaded_model=loaded,
+        mc_passes=3,
+        mask_prob=0.3,
+        seed=0,
+        batch_size=2,
+        progress_callback=lambda p, t: calls.append((p, t)),
+    )
+
+    assert len(calls) == 3
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+
+
 def test_predict_dispatches_by_method_config() -> None:
     """Unified predict() uses mc_predict when mc_passes > 0, else predict_mean."""
     from bulkformer_dx.io.schemas import MethodConfig

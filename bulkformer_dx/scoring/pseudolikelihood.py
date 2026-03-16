@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from bulkformer_dx.anomaly.scoring import (
     generate_deterministic_mask_plan,
@@ -152,7 +153,7 @@ def compute_mc_masked_loglikelihood_scores(
     nll_sum_by_sg = np.zeros((n_samples, n_genes), dtype=float)
     nll_count_by_sg = np.zeros((n_samples, n_genes), dtype=float)
 
-    for p in range(mc_passes):
+    for p in tqdm(range(mc_passes), desc="NLL aggregation", unit="pass", leave=False):
         pred_p = mc_samples[p]
         for s in range(n_samples):
             for g in range(n_genes):

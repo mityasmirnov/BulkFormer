@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
+from tqdm import tqdm
 
 from bulkformer_dx.bulkformer_model import load_bulkformer_model
 from bulkformer_dx.io.schemas import AlignedExpressionBundle, MethodConfig, ModelPredictionBundle
@@ -204,6 +205,9 @@ def mc_predict(
     checkpoint_path: str | Path | None = None,
     device: str = "cpu",
     model_kwargs: dict[str, Any] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    checkpoint_dir: Path | None = None,
+    checkpoint_every_n: int = 10,
 ) -> tuple[ModelPredictionBundle, np.ndarray]:
     """Run MC masking passes and return predictions plus mc_samples.
 
@@ -275,7 +279,7 @@ def mc_predict(
     MASK_TOKEN = -10.0
     mc_samples = np.full((mc_passes, n_samples, n_genes), np.nan, dtype=np.float32)
 
-    for pass_idx in range(mc_passes):
+    for pass_idx in tqdm(range(mc_passes), desc="MC passes", unit="pass"):
         masked = Y.copy()
         masked[mask_plan[:, pass_idx, :]] = MASK_TOKEN
         genes_masked_this_pass = mask_plan[:, pass_idx, :].sum(axis=1)
@@ -289,6 +293,16 @@ def mc_predict(
             device=loaded.device,
         )
         mc_samples[pass_idx] = pred
+
+        if progress_callback is not None:
+            progress_callback(pass_idx + 1, mc_passes)
+        if (
+            checkpoint_dir is not None
+            and checkpoint_every_n > 0
+            and (pass_idx + 1) % checkpoint_every_n == 0
+        ):
+            ckpt_path = checkpoint_dir / "mc_samples_checkpoint.npy"
+            np.save(ckpt_path, mc_samples[: pass_idx + 1], allow_pickle=False)
 
     mu = np.nanmean(mc_samples, axis=0).astype(np.float32)
     sigma_hat = None

@@ -293,9 +293,12 @@ def _predict_masked_expression(
     Grouping rows by their effective mask ratio lets predictors that condition
     on mask intensity run once per unique fraction instead of once per row.
     """
+    from tqdm import tqdm
+
     row_mask_fractions = (masked_expression == fill_value).mean(axis=1)
     predicted = np.empty_like(masked_expression, dtype=float)
-    for mask_fraction in np.unique(row_mask_fractions):
+    unique_fractions = np.unique(row_mask_fractions)
+    for mask_fraction in tqdm(unique_fractions, desc="Mask fractions", unit="frac", leave=False):
         row_selector = np.isclose(row_mask_fractions, mask_fraction)
         predicted_subset = np.asarray(
             predictor(masked_expression[row_selector], float(mask_fraction)),
@@ -568,11 +571,23 @@ def _run_residual(args: argparse.Namespace) -> int:
 
 def _run_nll(args: argparse.Namespace) -> int:
     """Execute NLL (pseudo-likelihood) anomaly scoring."""
+    import json
     from pathlib import Path
 
     from bulkformer_dx.io.schemas import AlignedExpressionBundle
     from bulkformer_dx.model.bulkformer import mc_predict
     from bulkformer_dx.scoring.pseudolikelihood import compute_mc_masked_loglikelihood_scores
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    def progress_callback(pass_idx: int, total: int) -> None:
+        (output_dir / "progress.json").write_text(
+            json.dumps({"pass": pass_idx, "total": total}),
+            encoding="utf-8",
+        )
+
+    checkpoint_every = getattr(args, "checkpoint_every", 10)
 
     input_path = Path(args.input)
     if input_path.is_dir():
@@ -646,6 +661,9 @@ def _run_nll(args: argparse.Namespace) -> int:
         mask_schedule=mask_schedule,
         K_target=K_target,
         seed=args.random_seed,
+        progress_callback=progress_callback,
+        checkpoint_dir=output_dir if checkpoint_every > 0 else None,
+        checkpoint_every_n=checkpoint_every,
     )
     pred_bundle = type(pred_bundle)(
         y_hat=pred_bundle.y_hat,
@@ -664,8 +682,6 @@ def _run_nll(args: argparse.Namespace) -> int:
         seed=args.random_seed,
     )
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     ranked_dir = output_dir / "ranked_genes"
     ranked_dir.mkdir(parents=True, exist_ok=True)
     valid_gene_count = int(valid_flags.sum())
