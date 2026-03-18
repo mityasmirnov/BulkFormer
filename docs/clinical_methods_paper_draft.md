@@ -222,9 +222,16 @@ The clinical pipeline (BulkFormer-DX) strictly adheres to a length-normalized wo
 
 **Example (single gene)**: For gene $g$ with length 2000 bp, raw count 100, and sample total rate $10^7$: $rate_g = 100/2 = 50$, $TPM_g = 50 \times 10^6 / 10^7 = 5$, $log1p(TPM_g) = \ln(6) \approx 1.79$.
 
-**Optional low-expression filtering**: `--min-count N` and `--min-tpm T` filter genes before alignment. OUTRIDER recommends FPKM > 1; analogous filtering can reduce noise from zero-inflated genes. The clinical cohort used in this work did not apply such filtering by default.
+**OUTRIDER-like expression filtering** (default for clinical): To ensure anomaly detection and calibration only run on reliably quantified genes, the preprocessor applies an OUTRIDER-like filter. A gene passes if (1) its $p$th percentile FPKM across the cohort exceeds `fpkmCutoff` (default 1.0, $p=0.95$), and (2) it has non-zero counts in at least $\lceil n \times \text{fraction} \rceil$ samples (default fraction 0.01, i.e., 1 per 100). Gene lengths for FPKM are derived from GTF exon-union, a precomputed exon-lengths TSV (TxDb-exported), or the annotation table. Filtered genes are marked in `valid_gene_mask.tsv` (`passed_expression_filter`); only genes with both `is_valid` and `passed_expression_filter` are scored. Use `--expression-filter none` to disable. Example with exon lengths:
 
-**Outputs**: `tpm.tsv`, `log1p_tpm.tsv`, `aligned_log1p_tpm.tsv`, `valid_gene_mask.tsv`, `preprocess_report.json`, and optionally `aligned_counts.tsv`, `gene_lengths_aligned.tsv`, `sample_scaling.tsv`.
+```bash
+python -m bulkformer_dx preprocess --counts counts.tsv --gtf genes.gtf \
+  --expression-filter outrider_like --output-dir preprocess_out
+```
+
+**Optional legacy low-expression filtering**: `--min-count N` and `--min-tpm T` filter genes before alignment (separate from OUTRIDER-like).
+
+**Outputs**: `tpm.tsv`, `log1p_tpm.tsv`, `aligned_log1p_tpm.tsv`, `valid_gene_mask.tsv`, `preprocess_report.json`, `expression_filter.tsv` (when OUTRIDER-like filter is used), and optionally `aligned_counts.tsv`, `gene_lengths_aligned.tsv`, `sample_scaling.tsv`.
 
 #### 4.1.1 Detailed Preprocessing Logic
 
@@ -241,7 +248,7 @@ Because BulkFormer is a masked autoencoder, "anomalies" are defined as genes whe
 
 **Step-by-step procedure**:
 
-1.  **Valid Gene Resolution**: `valid_gene_mask.tsv` is aligned to the expression matrix columns to produce boolean `valid_gene_flags`. Only valid genes (present in the input and with non-missing values) are eligible for masking.
+1.  **Valid Gene Resolution**: `valid_gene_mask.tsv` is aligned to the expression matrix columns to produce boolean `valid_gene_flags`. When `passed_expression_filter` is present, `valid_gene_flags = is_valid & passed_expression_filter`; otherwise `valid_gene_flags = is_valid`. Only genes with `valid_gene_flags` true are eligible for masking and appear in ranked outputs.
 
 2.  **Mask Plan Generation**: For each sample and each MC pass, $\lceil n_{valid} \times p_{mask} \rceil$ valid genes are chosen. With **stochastic masking** (default), genes are chosen uniformly without replacement per pass. This can yield genes with 0–1 masked evaluations across all passes, producing unstable NLL scores or missing values. For clinical NLL mode, **deterministic round-robin masking** with lower mask_prob (7–10%) and more passes is recommended to guarantee coverage of all valid genes. The mask plan has shape `[samples, mc_passes, genes]`.
 

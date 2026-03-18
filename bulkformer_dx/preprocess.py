@@ -13,6 +13,9 @@ import pandas as pd
 
 DEFAULT_FILL_VALUE = -10.0
 DEFAULT_MISSING_GENE_LENGTH_BP = 1000.0
+DEFAULT_FPKM_CUTOFF = 1.0
+DEFAULT_FPKM_PERCENTILE = 0.95
+DEFAULT_MIN_COUNTS_FRACTION = 0.01  # 1 per 100 samples
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BULKFORMER_GENE_INFO = REPO_ROOT / "data" / "bulkformer_gene_info.csv"
 COUNT_ORIENTATIONS = ("genes-by-samples", "samples-by-genes")
@@ -28,6 +31,8 @@ GENE_LENGTH_COLUMN_CANDIDATES = (
     "length",
     "gene_length_bp",
     "gene_length_base_pairs",
+    "basepairs",
+    "exon_basepairs",
 )
 GENOMIC_START_COLUMN_CANDIDATES = ("start", "gene_start", "tx_start")
 GENOMIC_END_COLUMN_CANDIDATES = ("end", "gene_end", "tx_end")
@@ -47,6 +52,7 @@ class PreprocessResult:
     sample_scaling: pd.DataFrame
     valid_gene_mask: pd.DataFrame
     report: dict[str, Any]
+    expression_filter_table: pd.DataFrame | None = None
 
 
 def normalize_ensembl_id(gene_id: object) -> str | None:
@@ -283,6 +289,114 @@ def counts_to_tpm(
     return tpm_frame, missing_lengths
 
 
+def compute_fpkm(
+    counts: pd.DataFrame,
+    gene_lengths_bp: dict[str, float],
+    *,
+    missing_gene_length_bp: float = DEFAULT_MISSING_GENE_LENGTH_BP,
+) -> pd.DataFrame:
+    """Compute FPKM = (counts / length_kb) / (library_size / 1e6)."""
+    library_size_m = counts.sum(axis=1).to_numpy() / 1e6
+    library_size_m[library_size_m == 0] = 1e-6
+
+    gene_lengths_kb = np.array(
+        [
+            gene_lengths_bp.get(gene_id, missing_gene_length_bp) / 1000.0
+            for gene_id in counts.columns
+        ],
+        dtype=float,
+    )
+    # FPKM = (counts / length_kb) / (library_size / 1e6)
+    # counts: [samples x genes]
+    # library_size_m: [samples]
+    # gene_lengths_kb: [genes]
+    fpkm = counts.to_numpy(dtype=float) / gene_lengths_kb / library_size_m[:, np.newaxis]
+    return pd.DataFrame(fpkm, index=counts.index, columns=counts.columns)
+
+
+def outrider_like_passed_filter(
+    fpkm: pd.DataFrame,
+    fpkm_cutoff: float = DEFAULT_FPKM_CUTOFF,
+    percentile: float = DEFAULT_FPKM_PERCENTILE,
+) -> pd.Series:
+    """For each gene: passed = quantile(fpkm_gene, percentile) > fpkm_cutoff."""
+    quantiles = fpkm.quantile(percentile, axis=0)
+    return quantiles > fpkm_cutoff
+
+
+def min_count_requirements(
+    counts: pd.DataFrame,
+    fraction: float = DEFAULT_MIN_COUNTS_FRACTION,
+) -> pd.Series:
+    """Enforce minimum non-zero counts across the cohort.
+
+    Passed if:
+    1. At least one sample has non-zero count.
+    2. Non-zero count in at least ceil(n_samples * fraction) samples.
+    """
+    n_samples = len(counts)
+    nonzero_mask = (counts > 0).sum(axis=0)
+    min_nonzero = int(np.ceil(n_samples * fraction))
+    # Standard OUTRIDER-like behavior has 1/100 default.
+    # We use fraction instead of counts per sample to be robust.
+    return (nonzero_mask >= 1) & (nonzero_mask >= min_nonzero)
+
+
+def compute_exon_union_lengths(gtf_path: Path) -> dict[str, float]:
+    """Parse GTF/GFF to compute exon-union length per gene."""
+    import re
+    exon_intervals: dict[str, list[tuple[int, int]]] = {}
+
+    # Parse file for exon features
+    _logger_fn = lambda msg: print(f"GTF Parsing: {msg}")
+    _logger_fn(f"Reading GTF from {gtf_path}")
+
+    # Simple GTF parser for exon intervals
+    with gtf_path.open("r") as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            parts = line.strip().split("\t")
+            if len(parts) < 9 or parts[2] != "exon":
+                continue
+
+            start, end = int(parts[3]), int(parts[4])
+            attributes = parts[8]
+
+            # Extract gene_id
+            match = re.search(r'gene_id "([^"]+)"', attributes)
+            if not match:
+                match = re.search(r'gene_id=([^;]+)', attributes)
+            
+            if match:
+                gene_id = normalize_ensembl_id(match.group(1))
+                if gene_id:
+                    if gene_id not in exon_intervals:
+                        exon_intervals[gene_id] = []
+                    exon_intervals[gene_id].append((start, end))
+
+    # Union overlapping intervals per gene and sum
+    gene_lengths: dict[str, float] = {}
+    for gene_id, intervals in exon_intervals.items():
+        intervals.sort()
+        if not intervals:
+            continue
+
+        union_len = 0
+        curr_start, curr_end = intervals[0]
+        for next_start, next_end in intervals[1:]:
+            if next_start <= curr_end:
+                curr_end = max(curr_end, next_end)
+            else:
+                union_len += curr_end - curr_start + 1
+                curr_start, curr_end = next_start, next_end
+        union_len += curr_end - curr_start + 1
+        gene_lengths[gene_id] = float(union_len)
+
+    _logger_fn(f"Computed lengths for {len(gene_lengths)} genes from GTF.")
+    return gene_lengths
+
+
 def load_bulkformer_gene_panel(gene_info_path: Path = DEFAULT_BULKFORMER_GENE_INFO) -> list[str]:
     """Load the BulkFormer gene vocabulary in model order."""
     gene_info = _read_table(gene_info_path)
@@ -302,6 +416,7 @@ def align_to_bulkformer_genes(
     gene_panel: list[str],
     *,
     fill_value: float = DEFAULT_FILL_VALUE,
+    passed_filter_genes: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Align an expression matrix to the BulkFormer vocabulary and fill missing genes."""
     aligned = expression.reindex(columns=gene_panel, fill_value=fill_value)
@@ -312,6 +427,14 @@ def align_to_bulkformer_genes(
             "is_valid": [int(gene_id in present_genes) for gene_id in gene_panel],
         }
     )
+    if passed_filter_genes is not None:
+        mask["passed_expression_filter"] = [
+            int(gene_id in passed_filter_genes) for gene_id in gene_panel
+        ]
+    else:
+        mask["passed_expression_filter"] = 1  # Default to everything if no filter run
+
+    mask["is_scored_gene"] = mask["is_valid"] & mask["passed_expression_filter"]
     mask["is_missing_fill"] = 1 - mask["is_valid"]
     return aligned, mask
 
@@ -355,6 +478,7 @@ def build_gene_lengths_aligned(
     bulkformer_gene_info_path: Path = DEFAULT_BULKFORMER_GENE_INFO,
     *,
     missing_gene_length_bp: float = DEFAULT_MISSING_GENE_LENGTH_BP,
+    length_source: str = "annotation",
 ) -> pd.DataFrame:
     """Build gene_lengths_aligned table for the BulkFormer panel."""
     gene_info = _read_table(bulkformer_gene_info_path)
@@ -368,13 +492,20 @@ def build_gene_lengths_aligned(
     rows = []
     for gid in gene_panel:
         length_bp = annotation_lengths.get(gid) or bulkformer_lengths.get(gid)
+        source = length_source if gid in annotation_lengths else "bulkformer_info"
         if length_bp is not None and length_bp > 0:
             length_kb = length_bp / 1000.0
             has_length = 1
         else:
             length_kb = missing_gene_length_bp / 1000.0
             has_length = 0
-        rows.append({"ensg_id": gid, "length_kb": length_kb, "has_length": has_length})
+            source = "fallback_default"
+        rows.append({
+            "ensg_id": gid,
+            "length_kb": length_kb,
+            "has_length": has_length,
+            "length_source": source,
+        })
     return pd.DataFrame(rows)
 
 
@@ -405,7 +536,7 @@ def _apply_low_expression_filter(
 def preprocess_counts(
     *,
     counts_path: Path,
-    annotation_path: Path,
+    annotation_path: Path | None = None,
     bulkformer_gene_info_path: Path = DEFAULT_BULKFORMER_GENE_INFO,
     counts_orientation: str = "genes-by-samples",
     gene_column: str | None = None,
@@ -416,6 +547,13 @@ def preprocess_counts(
     missing_gene_length_bp: float = DEFAULT_MISSING_GENE_LENGTH_BP,
     min_count: float | None = None,
     min_tpm: float | None = None,
+    expression_filter: str = "none",
+    fpkm_cutoff: float = DEFAULT_FPKM_CUTOFF,
+    fpkm_percentile: float = DEFAULT_FPKM_PERCENTILE,
+    min_counts_fraction: float = DEFAULT_MIN_COUNTS_FRACTION,
+    min_counts_only: bool = False,
+    gtf_path: Path | None = None,
+    exon_lengths_tsv: Path | None = None,
 ) -> PreprocessResult:
     """Run counts loading, TPM normalization, and BulkFormer alignment."""
     counts, counts_metadata = load_counts_matrix(
@@ -424,19 +562,93 @@ def preprocess_counts(
         gene_column=gene_column,
         sample_column=sample_column,
     )
-    gene_lengths, annotation_metadata = load_gene_lengths(
-        annotation_path,
-        gene_id_column=annotation_gene_column,
-        length_column=annotation_length_column,
-    )
+
+    # Determine gene lengths
+    gene_lengths: dict[str, float] = {}
+    length_source = "fallback_default"
+    annotation_metadata = {
+        "annotation_rows": 0,
+        "usable_gene_lengths": 0,
+        "duplicate_gene_ids": 0,
+        "length_strategy": "none",
+    }
+
+    if exon_lengths_tsv:
+        table = _read_table(exon_lengths_tsv)
+        id_col = _resolve_column(table.columns, GENE_ID_COLUMN_CANDIDATES, "gene ID")
+        len_col = _resolve_column(table.columns, GENE_LENGTH_COLUMN_CANDIDATES, "gene length")
+        gene_lengths = {
+            normalize_ensembl_id(row[id_col]): float(row[len_col])
+            for _, row in table.iterrows()
+            if normalize_ensembl_id(row[id_col])
+        }
+        length_source = "txdb_tsv"
+        annotation_metadata["length_strategy"] = "exon_lengths_tsv"
+        annotation_metadata["usable_gene_lengths"] = len(gene_lengths)
+    elif gtf_path:
+        gene_lengths = compute_exon_union_lengths(gtf_path)
+        length_source = "gtf_exon_union"
+        annotation_metadata["length_strategy"] = "gtf_parsing"
+        annotation_metadata["usable_gene_lengths"] = len(gene_lengths)
+    elif annotation_path:
+        gene_lengths, annotation_metadata = load_gene_lengths(
+            annotation_path,
+            gene_id_column=annotation_gene_column,
+            length_column=annotation_length_column,
+        )
+        length_source = "annotation_table"
+
+    # Expression Filtering
+    fpkm: pd.DataFrame | None = None
+    passed_min_counts = min_count_requirements(counts, fraction=min_counts_fraction)
+    passed_fpkm_filter = pd.Series(True, index=counts.columns)
+    filter_info = {}
+
+    if expression_filter == "outrider_like":
+        fpkm = compute_fpkm(counts, gene_lengths, missing_gene_length_bp=missing_gene_length_bp)
+        if not min_counts_only:
+            passed_fpkm_filter = outrider_like_passed_filter(
+                fpkm, fpkm_cutoff=fpkm_cutoff, percentile=fpkm_percentile
+            )
+        
+        passed_final = passed_min_counts & passed_fpkm_filter
+        passed_filter_genes = set(passed_final.index[passed_final])
+        
+        # Diagnostics (all rows are input genes, so is_present_in_input=1)
+        diag_df = pd.DataFrame({
+            "ensg_id": counts.columns,
+            "is_present_in_input": 1,
+            "passed_min_counts": passed_min_counts.astype(int),
+            "passed_fpkm_filter": passed_fpkm_filter.astype(int),
+            "passed_expression_filter": passed_final.astype(int),
+        })
+        if fpkm is not None:
+            diag_df[f"fpkm_p{int(fpkm_percentile*100)}"] = fpkm.quantile(fpkm_percentile, axis=0).values
+            diag_df["median_fpkm"] = fpkm.median(axis=0).values
+        
+        diag_df["length_bp_used"] = [
+            gene_lengths.get(g, missing_gene_length_bp) for g in counts.columns
+        ]
+        diag_df["length_source"] = [
+            length_source if g in gene_lengths else "fallback_default"
+            for g in counts.columns
+        ]
+        filter_info["expression_filter_table"] = diag_df
+    else:
+        passed_filter_genes = None
+
+    # Proceed with normal flow
     tpm, genes_missing_lengths = counts_to_tpm(
         counts,
         gene_lengths,
         missing_gene_length_bp=missing_gene_length_bp,
     )
-    counts, tpm, genes_filtered = _apply_low_expression_filter(
+    
+    # Legacy low-expression filter
+    counts, tpm, genes_filtered_legacy = _apply_low_expression_filter(
         counts, tpm, min_count=min_count, min_tpm=min_tpm
     )
+
     gene_lengths_kb = {
         g: gene_lengths.get(g, missing_gene_length_bp) / 1000.0
         for g in counts.columns
@@ -450,27 +662,35 @@ def preprocess_counts(
     gene_panel = load_bulkformer_gene_panel(bulkformer_gene_info_path)
     aligned_counts = align_counts_to_bulkformer(counts, gene_panel)
     aligned_tpm = tpm.reindex(columns=gene_panel, fill_value=0.0)
+    
     aligned_log1p_tpm, valid_gene_mask = align_to_bulkformer_genes(
         log1p_tpm,
         gene_panel,
         fill_value=fill_value,
+        passed_filter_genes=passed_filter_genes,
     )
     gene_lengths_aligned = build_gene_lengths_aligned(
         gene_panel,
         gene_lengths,
         bulkformer_gene_info_path,
         missing_gene_length_bp=missing_gene_length_bp,
+        length_source=length_source,
     )
 
     valid_gene_count = int(valid_gene_mask["is_valid"].sum())
+    scored_gene_count = int(valid_gene_mask["is_scored_gene"].sum())
+    
     report = {
         "counts_path": str(counts_path),
-        "annotation_path": str(annotation_path),
         "bulkformer_gene_info_path": str(bulkformer_gene_info_path),
         "samples": counts_metadata["samples"],
         "input_genes": counts_metadata["genes"],
         "genes_after_low_expression_filter": int(counts.shape[1]),
-        "genes_filtered_low_expression": genes_filtered,
+        "genes_filtered_low_expression": genes_filtered_legacy,
+        "genes_passed_expression_filter": scored_gene_count if expression_filter != "none" else valid_gene_count,
+        "genes_filtered_by_min_counts": int((~passed_min_counts).sum()) if expression_filter == "outrider_like" else 0,
+        "genes_filtered_by_fpkm": int((~passed_fpkm_filter).sum()) if expression_filter == "outrider_like" else 0,
+        "min_nonzero_samples_threshold": int(np.ceil(counts_metadata["samples"] * min_counts_fraction)),
         "collapsed_input_gene_columns": counts_metadata["collapsed_gene_columns"],
         "counts_orientation": counts_metadata["orientation"],
         "annotation_rows": annotation_metadata["annotation_rows"],
@@ -481,12 +701,17 @@ def preprocess_counts(
         "genes_missing_annotation_length_examples": genes_missing_lengths[:10],
         "bulkformer_gene_count": len(gene_panel),
         "bulkformer_valid_gene_count": valid_gene_count,
-        "bulkformer_missing_gene_count": int(len(gene_panel) - valid_gene_count),
-        "bulkformer_valid_gene_fraction": valid_gene_count / len(gene_panel),
+        "bulkformer_scored_gene_count": scored_gene_count,
         "fill_value": fill_value,
         "missing_gene_length_bp": missing_gene_length_bp,
+        "expression_filter_mode": expression_filter,
     }
-
+    if annotation_path:
+        report["annotation_path"] = str(annotation_path)
+    if gtf_path:
+        report["gtf_path"] = str(gtf_path)
+    if exon_lengths_tsv:
+        report["exon_lengths_tsv"] = str(exon_lengths_tsv)
     return PreprocessResult(
         counts=counts,
         tpm=tpm,
@@ -498,6 +723,7 @@ def preprocess_counts(
         sample_scaling=sample_scaling,
         valid_gene_mask=valid_gene_mask,
         report=report,
+        expression_filter_table=filter_info.get("expression_filter_table"),
     )
 
 
@@ -516,6 +742,11 @@ def write_preprocess_outputs(result: PreprocessResult, output_dir: Path) -> None
     result.sample_scaling.to_csv(output_dir / "sample_scaling.tsv", sep="\t")
     result.valid_gene_mask.to_csv(output_dir / "valid_gene_mask.tsv", sep="\t", index=False)
 
+    if result.expression_filter_table is not None:
+        result.expression_filter_table.to_csv(
+            output_dir / "expression_filter.tsv", sep="\t", index=False
+        )
+
     with (output_dir / "preprocess_report.json").open("w", encoding="utf-8") as handle:
         json.dump(result.report, handle, indent=2, sort_keys=True)
         handle.write("\n")
@@ -533,7 +764,7 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         ),
     )
     parser.add_argument("--counts", required=True, help="Path to the raw counts table.")
-    parser.add_argument("--annotation", required=True, help="Path to the gene annotation table.")
+    parser.add_argument("--annotation", help="Path to the gene annotation table.")
     parser.add_argument(
         "--output-dir",
         required=True,
@@ -592,6 +823,44 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         metavar="T",
         help="Filter out genes with median TPM across samples < T (optional low-expression filter).",
     )
+    # New arguments for OUTRIDER-like filtering
+    parser.add_argument(
+        "--expression-filter",
+        choices=["none", "outrider_like"],
+        default="outrider_like",
+        help="Gene expression filter logic. Default 'outrider_like' for clinical use.",
+    )
+    parser.add_argument(
+        "--fpkm-cutoff",
+        type=float,
+        default=DEFAULT_FPKM_CUTOFF,
+        help="FPKM cutoff for the percentile-based filter (default 1.0).",
+    )
+    parser.add_argument(
+        "--fpkm-percentile",
+        type=float,
+        default=DEFAULT_FPKM_PERCENTILE,
+        help="Percentile for FPKM-based filtering (default 0.95).",
+    )
+    parser.add_argument(
+        "--min-counts-fraction",
+        type=float,
+        default=DEFAULT_MIN_COUNTS_FRACTION,
+        help="Min sample fraction with non-zero counts (default 0.01 = 1 per 100 samples).",
+    )
+    parser.add_argument(
+        "--min-counts-only",
+        action="store_true",
+        help="If set, skip FPKM percentile filter; only drop genes violating min-counts requirements.",
+    )
+    parser.add_argument(
+        "--gtf",
+        help="Path to a GTF/GFF file for exon-union length calculation.",
+    )
+    parser.add_argument(
+        "--exon-lengths-tsv",
+        help="Path to a TSV with precomputed exon-union lengths (columns: gene_id, basepairs).",
+    )
     parser.set_defaults(func=run)
 
 
@@ -599,7 +868,7 @@ def run(args: argparse.Namespace) -> int:
     """Execute the preprocessing workflow."""
     result = preprocess_counts(
         counts_path=Path(args.counts),
-        annotation_path=Path(args.annotation),
+        annotation_path=Path(args.annotation) if args.annotation else None,
         bulkformer_gene_info_path=Path(args.bulkformer_gene_info),
         counts_orientation=args.counts_orientation,
         gene_column=args.gene_column,
@@ -610,18 +879,22 @@ def run(args: argparse.Namespace) -> int:
         missing_gene_length_bp=args.missing_gene_length_bp,
         min_count=getattr(args, "min_count", None),
         min_tpm=getattr(args, "min_tpm", None),
+        expression_filter=args.expression_filter,
+        fpkm_cutoff=args.fpkm_cutoff,
+        fpkm_percentile=args.fpkm_percentile,
+        min_counts_fraction=args.min_counts_fraction,
+        min_counts_only=args.min_counts_only,
+        gtf_path=Path(args.gtf) if args.gtf else None,
+        exon_lengths_tsv=Path(args.exon_lengths_tsv) if args.exon_lengths_tsv else None,
     )
     output_dir = Path(args.output_dir)
     write_preprocess_outputs(result, output_dir)
 
     print(f"Wrote preprocessing outputs to {output_dir}")
-    print(
-        "Samples: {samples} | input genes: {input_genes} | BulkFormer-valid genes: "
-        "{valid}/{panel}".format(
-            samples=result.report["samples"],
-            input_genes=result.report["input_genes"],
-            valid=result.report["bulkformer_valid_gene_count"],
-            panel=result.report["bulkformer_gene_count"],
-        )
-    )
+    valid = result.report["bulkformer_valid_gene_count"]
+    panel = result.report["bulkformer_gene_count"]
+    print(f"BulkFormer-valid genes: {valid}/{panel}")
+    if result.report.get("expression_filter_mode") != "none":
+        scored = result.report.get("genes_passed_expression_filter", valid)
+        print(f"Scored genes (expression filter applied): {scored}/{valid}")
     return 0

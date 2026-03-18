@@ -105,9 +105,15 @@ def load_valid_gene_mask(path: Path) -> pd.DataFrame:
         raise ValueError(
             f"Valid-gene mask is missing required columns: {missing_list}."
         )
-    valid_gene_mask = valid_gene_mask.loc[:, ["ensg_id", "is_valid"]].copy()
+    # Keep required columns plus any optional filtering columns
+    optional_cols = {"passed_expression_filter", "is_scored_gene", "is_missing_fill"}
+    cols_to_keep = ["ensg_id", "is_valid"] + [c for c in optional_cols if c in valid_gene_mask.columns]
+    valid_gene_mask = valid_gene_mask.loc[:, cols_to_keep].copy()
     valid_gene_mask["ensg_id"] = valid_gene_mask["ensg_id"].astype(str)
     valid_gene_mask["is_valid"] = valid_gene_mask["is_valid"].astype(int)
+    for col in optional_cols:
+        if col in valid_gene_mask.columns:
+            valid_gene_mask[col] = valid_gene_mask[col].astype(int)
     return valid_gene_mask
 
 
@@ -125,7 +131,13 @@ def resolve_valid_gene_flags(
             "Valid-gene mask did not cover every input gene column. Missing genes: "
             f"{preview}"
         )
-    return resolved["is_valid"].to_numpy(dtype=bool)
+    
+    # Resolve effective 'valid' status: must be present (is_valid) AND passed expression filter
+    # if the filter column is present.
+    valid_flags = resolved["is_valid"].to_numpy(dtype=bool)
+    if "passed_expression_filter" in resolved.columns:
+        valid_flags &= resolved["passed_expression_filter"].to_numpy(dtype=bool)
+    return valid_flags
 
 
 def generate_mc_mask_plan(
