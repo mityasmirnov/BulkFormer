@@ -2,7 +2,7 @@
 ## Foundations of Bulk Transcriptome Modeling and Persistent Distributional Alignment
 
 ### Abstract
-Bulk transcriptome analysis remains the cornerstone of precision medicine, yet the identification of rare transcriptomic anomalies is frequently confounded by technical noise, batch effects, and the inherent heteroscedasticity of RNA-sequencing data. Robust foundation models like BulkFormer offer a powerful representation of gene-gene dependencies, but their raw predictions require sophisticated calibration to be clinically actionable. In this work, we evaluate five distinct calibration frameworks—Empirical Gaussian, Student-T, Negative Binomial (NB-Outrider), Local Cohort (kNN-latent), and NLL pseudo-likelihood—on a 146-sample clinical RNA-seq cohort. We demonstrate that while standard Gaussian assumptions lead to a 50-fold inflation in false discovery (mean ~10,394 outliers per sample without gene-wise centering), the NB-Outrider framework achieves near-perfect alignment with the theoretical null distribution (KS-stat: 0.027). With gene-wise centering and Benjamini-Yekutieli correction, the 37M model yields mean 79.4 and median 40 absolute outliers per sample at α=0.05; the 147M model with α=0.01 yields mean 39.6 and median 20.5. This manuscript details the BulkFormer-DX architecture, the Monte Carlo masking inference procedure, and the statistical proofs supporting Negative Binomial calibration as the gold standard for clinical anomaly detection.
+Bulk transcriptome analysis remains the cornerstone of precision medicine, yet the identification of rare transcriptomic anomalies is frequently confounded by technical noise, batch effects, and the inherent heteroscedasticity of RNA-sequencing data. Robust foundation models like BulkFormer offer a powerful representation of gene-gene dependencies, but their raw predictions require sophisticated calibration to be clinically actionable. In this work, we evaluate five distinct calibration frameworks—Empirical Gaussian, Student-T, Negative Binomial (NB-Outrider), Local Cohort (kNN-latent), and NLL pseudo-likelihood—on a 146-sample clinical RNA-seq cohort. We demonstrate that while standard Gaussian assumptions (without gene-wise centering) lead to massive inflation in false discovery, the NB-Outrider framework achieves the best p-value calibration (KS-stat: 0.027). Separately, NLL pseudo-likelihood scoring achieves the best causal gene retrieval metrics—highest recall@10 and recall@50, and best median causal rank—even though it is not best in KS calibration. With gene-wise centering and Benjamini-Yekutieli correction, the 37M model yields mean 79.4 and median 40 absolute outliers per sample at α=0.05; the 147M model with α=0.01 yields mean 39.6 and median 20.5. This manuscript details the BulkFormer-DX architecture, the Monte Carlo masking inference procedure, and the statistical proofs supporting NB-Outrider as the best-calibrated caller and NLL as the best retrieval ranker for clinical anomaly detection.
 
 ---
 
@@ -243,7 +243,7 @@ Because BulkFormer is a masked autoencoder, "anomalies" are defined as genes whe
 
 1.  **Valid Gene Resolution**: `valid_gene_mask.tsv` is aligned to the expression matrix columns to produce boolean `valid_gene_flags`. Only valid genes (present in the input and with non-missing values) are eligible for masking.
 
-2.  **Mask Plan Generation**: For each sample and each MC pass, $\lceil n_{valid} \times p_{mask} \rceil$ valid genes are chosen uniformly without replacement. The mask plan has shape `[samples, mc_passes, genes]`.
+2.  **Mask Plan Generation**: For each sample and each MC pass, $\lceil n_{valid} \times p_{mask} \rceil$ valid genes are chosen. With **stochastic masking** (default), genes are chosen uniformly without replacement per pass. This can yield genes with 0–1 masked evaluations across all passes, producing unstable NLL scores or missing values. For clinical NLL mode, **deterministic round-robin masking** with lower mask_prob (7–10%) and more passes is recommended to guarantee coverage of all valid genes. The mask plan has shape `[samples, mc_passes, genes]`.
 
 3.  **Mask Application**: Each sample is replicated `mc_passes` times. Masked positions are set to −10. The resulting 3D tensor is flattened to `[samples × mc_passes, genes]` for batch inference.
 
@@ -279,9 +279,9 @@ mean_signed_residual[s,g] = sum(r)/count
 ### 4.3 Hyperparameter Sensitivity and Ablation Rationale
 The choice of `mc_passes` and `mask_prob` significantly impacts the stability of the anomaly index.
 
-*   **Mask Probability (15%)**: Selected to match the pretraining environment. BulkFormer was trained with ~15% of genes masked per sample; inference with the same rate ensures the model sees a familiar masking pattern. Higher thresholds (e.g. 50%) degrade reconstruction quality by removing too much context. The clinical methods comparison notebook uses 10% for increased coverage when running 20 MC passes.
+*   **Mask Probability**: For residual-based calibration, 15% matches pretraining. For **clinical NLL mode** with deterministic masking, use **mask_prob 0.07–0.10** to achieve full gene coverage with fewer passes. Higher thresholds (e.g. 50%) degrade reconstruction quality by removing too much context. The clinical methods comparison notebook uses 10% with deterministic schedule (K_target=5).
 
-*   **MC Passes (16–20)**: Necessary to ensure at least 3–4 hits per gene on average. With $n_{valid} \approx 18{,}500$ and $p_{mask} = 0.15$, each pass masks ~2,775 genes; over 16 passes each gene is expected to be masked ~2.4 times. Lower pass counts (e.g. 8) reduce the number of genes scored and can improve runtime for the 147M model, but increase variance in residuals. The 37M model typically uses 16–20 passes; the 147M model may use 8 to balance fidelity and runtime.
+*   **MC Passes**: For stochastic masking, 16–20 passes ensure ~2.4 hits per gene on average. For **deterministic masking**, mc_passes is derived from K_target and mask_prob: $mc_{passes} = \lceil K_{target} \cdot n_{valid} / m \rceil$ where $m = \lceil n_{valid} \times p_{mask} \rceil$. With K_target=5, mask_prob=0.10, ~20k genes → ~16 passes. The 37M model typically uses 16–20 passes; the 147M model may use 8 to balance fidelity and runtime.
 
 *   **Gene-Wise Centering**: Critical for calibration (see [docs/bulkformer-dx/deep-research-report.md](docs/bulkformer-dx/deep-research-report.md)). Without centering, systematic gene-wise bias causes the Gaussian z-score to flag nearly every sample for affected genes (~50-fold inflation). The fix: $z_{sg} = (r_{sg} - \text{median}_s(r_{sg})) / \sigma_g$. Disable with `--no-gene-wise-centering` only for debugging.
 
@@ -291,7 +291,7 @@ The anomaly scoring stage processes samples in batches. The batch size (default 
 ### 4.5 Valid Gene Mask and Coverage
 The `valid_gene_mask.tsv` distinguishes genes observed in the user data from genes inserted only to match the BulkFormer vocabulary. Genes absent from the input are filled with −10 and flagged `is_valid=0`; NB-Outrider and other count-space methods apply only to `is_valid=1` genes. Mean gene coverage fraction (fraction of valid genes masked at least once per sample) is typically ~0.92–0.93 with 16 MC passes and mask prob 0.15. The `gene_qc.tsv` output reports per-gene mask coverage and residual summaries across the cohort for quality control.
 
-**Deterministic mask schedule**: For NLL scoring, stochastic masking can leave some genes with 0–1 masked evaluations, producing noisy or missing scores. The pipeline supports `--mask-schedule deterministic` with `--K-target 5`, which uses round-robin chunking to guarantee at least K_target masked evaluations per valid gene per sample. With mask_prob 0.10 and K_target 5, mc_passes is computed as $\lceil K \cdot n_{valid} / m \rceil$ (e.g., ~50 passes for ~20k genes). This yields uniform coverage and stable NLL scores. Use `--mask-schedule deterministic` for production NLL workflows.
+**Deterministic mask schedule**: For NLL scoring, **stochastic masking** can yield genes with 0–1 masked evaluations across passes, producing unstable NLL scores or missing values. The pipeline supports `--mask-schedule deterministic` with `--K-target 5`, which uses round-robin chunking to guarantee at least K_target masked evaluations per valid gene per sample. **Clinical NLL mode** should use deterministic masking with lower mask_prob (0.07–0.10) and mc_passes derived from K_target and mask_prob: $mc_{passes} = \lceil K_{target} \cdot n_{valid} / m \rceil$ where $m = \lceil n_{valid} \times p_{mask} \rceil$. This yields 100% gene coverage and stable NLL scores. Use `--mask-schedule deterministic --K-target 5 --mask-prob 0.07` to `0.10` for production NLL workflows.
 
 ### 4.6 Score Types: Residual vs NLL
 The default anomaly score is **residual** (mean absolute residual over MC passes). The **NLL** score type (`--score-type nll`) instead accumulates log-probabilities under a chosen distribution (Gaussian, Student-t, or NB when counts exist). NLL scoring requires specifying `distribution` and `uncertainty_source`; it produces per-gene NLL scores that can be calibrated empirically or used for density-based ranking. The residual path is simpler and is the default for most use cases; NLL is useful when the model's uncertainty (e.g., from a sigma head) is of interest. Both score types use the same MC mask plan; only the aggregation differs (MAR vs mean NLL).
@@ -345,7 +345,7 @@ The Negative Binomial test models the raw count process directly, following OUTR
 
 *   **Implementation**: `anomaly calibrate --scores <dir> --output-dir <out> --count-space-method nb_outrider --count-space-path <preprocess_dir> --alpha 0.05`. Requires preprocess output with `aligned_counts.tsv`, `gene_lengths_aligned.tsv`, `sample_scaling.tsv`.
 
-*   **Superiority**: By respecting the discrete and heteroscedastic nature of counts, NB-Outrider eliminates the bias introduced by log-transformation noise at low TPMs.
+*   **Calibration advantage**: By respecting the discrete and heteroscedastic nature of counts, NB-Outrider achieves the best p-value calibration (KS ~0.027) and eliminates the bias introduced by log-transformation noise at low TPMs.
 
 ### 5.4 Framework D: kNN-Local Latent Calibration
 This method creates a "local cohort" for each sample to reduce confounding from tissue or batch.
@@ -405,7 +405,7 @@ All methods are expressible via a unified `MethodConfig` schema for benchmark gr
 | :--- | :--- | :--- | :--- | :--- |
 | none (Gaussian) | log1p_tpm | zscore_2s | global | Baseline; requires gene-wise centering |
 | student_t | log1p_tpm | zscore_2s | global | Heavy-tailed residuals; conservative |
-| nb_outrider | counts | outrider_nb_2s | global | Raw counts available; best calibration |
+| nb_outrider | counts | outrider_nb_2s | global | Raw counts available; best p-value calibration |
 | knn_local | log1p_tpm | zscore_2s | kNN | Heterogeneous cohort; batch effects |
 | nll | log1p_tpm | pseudo_likelihood | global | Density-based ranking; sigma_head optional |
 
@@ -462,7 +462,7 @@ flowchart LR
 All evaluations use the 146-sample clinical RNA-seq cohort. The cohort comprises bulk RNA-seq profiles with raw counts in genes-by-samples format, Ensembl gene IDs (with version suffixes), and gene annotation (Gencode v29) for length-based TPM. After preprocessing: ~60,788 input genes (41 columns collapsed after version stripping), 19,751 BulkFormer-valid genes out of 20,010 in the panel. The methods comparison notebook uses 20 MC passes and mask prob 0.10 for higher coverage; the standard clinical run uses 16 MC passes and mask prob 0.15.
 
 ### 6.1 Calibration Purity (KS Stats)
-We evaluated the methods on the clinical cohort. Calibration quality was assessed via the Kolmogorov-Smirnov statistic against Uniform(0,1) for p-values (lower is better); discovery inflation was computed as the ratio of observed significant calls to the null expectation. The following table summarizes calibration quality and discovery rates (with gene-wise centering enabled where applicable):
+We evaluated the methods on the clinical cohort. Calibration quality was assessed via the Kolmogorov-Smirnov statistic against Uniform(0,1) for p-values (lower is better); discovery inflation was computed as the ratio of observed significant calls to the null expectation. The following table summarizes calibration quality and discovery rates for the four calibration-focused methods (with gene-wise centering enabled where applicable). NLL is evaluated separately for retrieval metrics (Section 6.12) as it optimizes for causal gene ranking rather than p-value calibration.
 
 | Metric | Gaussian (none) | Student-T | NB-Outrider | KNN-Local |
 | :--- | :--- | :--- | :--- | :--- |
@@ -608,28 +608,39 @@ The clinical preprocess step reports: samples count, input genes (after version 
 
 ### 6.9 Recommendations by Use Case
 
-*   **Rare disease / N=1**: Prefer NB-Outrider with raw counts; use kNN-Local if a reference cohort is available and tissue-matched. For a single patient, the "cohort" is the reference set; ensure it is biologically similar (same tissue, same condition). Gene-wise centering uses the reference cohort median.
+*   **Rare disease / N=1 prioritization**: Use **NLL deterministic-masked ranking** for sensitivity (top-10/top-50 retrieval), then **NB-Outrider** for validation of reportable outliers. NLL maximizes causal gene recovery; NB-Outrider provides calibrated significance. Use kNN-Local only when a reference cohort is available and tissue-matched (heterogeneous cohort); it fails on homogeneous cohorts.
 
-*   **Cohort screening**: Gaussian or Student-t with gene-wise centering; NB-Outrider when counts are available. For large cohorts (100+ samples), NB-Outrider dispersion fitting is amortized; the ~2 min calibration cost is acceptable. Use α=0.05 for discovery; α=0.01 for stricter calls.
+*   **Production calibrated calls**: Use **NB-Outrider** when raw counts are available. Best p-value calibration (KS ~0.027), balanced outlier counts, and correct modeling of the count process. 37M or 147M with α=0.05 (37M) or 0.01 (147M). Document calibration quality in the report.
 
-*   **Batch-confounded data**: kNN-Local calibration to restrict the null to embedding-space neighbors. Extract embeddings with `embeddings extract`; use k=50 as default. If the cohort has clear batch structure, consider stratifying by batch before kNN or using batch as a covariate in downstream analysis.
+*   **Cohort screening**: Gaussian or Student-t with gene-wise centering; NB-Outrider when counts are available. For large cohorts (100+ samples), NB-Outrider dispersion fitting is amortized. Use α=0.05 for discovery; α=0.01 for stricter calls.
 
-*   **Fast exploratory analysis**: 37M model, 16 MC passes, Gaussian calibration; upgrade to NB-Outrider for final calls. The Gaussian path is sub-second for calibration; NB-Outrider adds ~2 min. For iterative method comparison, use Gaussian first to identify samples of interest, then run NB-Outrider on the full cohort for publication.
+*   **Batch-confounded data**: kNN-Local calibration to restrict the null to embedding-space neighbors. Extract embeddings with `embeddings extract`; use k=50 as default. kNN-Local is designed for heterogeneous cohorts; it fails on homogeneous fibroblast cohorts (0 recall, inflated outliers).
 
-*   **Production diagnostic pipeline**: 37M or 147M with NB-Outrider, α=0.05 (37M) or 0.01 (147M). Ensure raw counts and count-space artifacts from preprocess. Run validation (spike-in or synthetic test) before deployment. Document calibration quality (KS, discovery inflation) in the report.
+*   **Fast exploratory analysis**: 37M model, 16 MC passes, Gaussian calibration; upgrade to NB-Outrider for final calibrated calls. The Gaussian path is sub-second for calibration; NB-Outrider adds ~2 min.
 
-*   **Research / method development**: Use the benchmark harness with MethodConfig grid. Run full grid (Gaussian, Student-t, NB-Outrider, kNN-Local) and compare KS, AUPRC, discovery inflation. The clinical methods comparison notebook provides a template.
+*   **Research / method development**: Use the benchmark harness with MethodConfig grid. Run full grid (Gaussian, Student-t, NB-Outrider, kNN-Local, NLL) and compare KS (calibration) vs recall@K and median rank (retrieval). The clinical methods comparison notebook provides a template.
 
 ### 6.9.1 Use Case Examples
 
-**Example 1: Mendelian disorder cohort (omicsDiagnostics-style)**. 146 fibroblast samples, some with known mutations. Use NB-Outrider with raw counts. Run preprocess with genes-by-samples counts. Calibrate with α=0.05. Expect mean ~79 absolute outliers per sample. Downstream: overlap outliers with known mutation genes; prioritize genes in pathways relevant to the patient's HPO phenotype.
+**Example 1: Mendelian disorder cohort (omicsDiagnostics-style)**. 146 fibroblast samples, some with known mutations. **Two-stage**: (1) NLL deterministic-masked ranking for top-50 causal gene retrieval; (2) NB-Outrider for calibrated outlier calls. Run preprocess with genes-by-samples counts. Expect mean ~79 absolute outliers per sample with NB-Outrider. Downstream: overlap outliers with known mutation genes; prioritize genes in pathways relevant to the patient's HPO phenotype.
 
-**Example 2: Cancer cell line panel**. 100+ cell lines, mixed tissue. Use kNN-Local to restrict null to similar cell lines. Extract embeddings; calibrate with k=50. Expect higher median outliers than global calibration due to local variance. Downstream: compare outlier profiles across cell lines; overlap with drug sensitivity data.
+**Example 2: Cancer cell line panel**. 100+ cell lines, mixed tissue. Use kNN-Local to restrict null to similar cell lines (heterogeneous cohort). Extract embeddings; calibrate with k=50. Expect higher median outliers than global calibration due to local variance. Downstream: compare outlier profiles across cell lines; overlap with drug sensitivity data.
 
-**Example 3: Single patient, no cohort**. Use a public reference (e.g., GTEx fibroblasts) as the "cohort." Preprocess patient + reference together. Run anomaly score. Calibrate with NB-Outrider or Gaussian using the reference samples for gene-wise statistics. The patient's residuals are compared to the reference null. Caveat: reference must be biologically similar (tissue, condition).
+**Example 3: Single patient, no cohort**. Use a public reference (e.g., GTEx fibroblasts) as the "cohort." Preprocess patient + reference together. Run anomaly score. Use NLL for ranking if causal gene prioritization is the goal; NB-Outrider or Gaussian for calibrated calls using the reference samples for gene-wise statistics. Caveat: reference must be biologically similar (tissue, condition).
 
 ### 6.10 Summary of Key Findings
-(1) **NB-Outrider achieves the best calibration** (KS 0.027) when raw counts and count-space artifacts are available. (2) **Gene-wise centering is essential** for z-score methods; without it, Gaussian calibration produces thousands of false positives per sample. (3) **Student-t is highly conservative** (median 0 outliers) and may be suitable when minimizing false positives is paramount. (4) **kNN-Local can over-call** (median 159 outliers) when the cohort is heterogeneous and the local neighborhood is not well-matched; it is best used when tissue or batch metadata suggests meaningful stratification. (5) **37M vs 147M**: The larger model yields fewer outliers at a stricter α but requires significantly more compute; for many applications, 37M with NB-Outrider is sufficient. (6) **Unified outliers browse** (Section 6.12): NB-Outrider achieves the best p-value calibration and balanced discoveries; **NLL achieves the best causal gene recall** (recall@50 9.26%, recall@10 3.70%) and best median rank (4633) among all methods—use NLL when maximizing causal gene recovery in top-K lists. kNN-Local fails (0 recall, median 159 outliers). Gene rank and volcano plots support method selection for single-sample vs cohort interpretation.
+(1) **NB-Outrider = best calibration** (KS ~0.027; balanced outlier counts median 8; good interpretability) when raw counts and count-space artifacts are available. (2) **NLL = best causal gene retrieval** at clinically relevant review depth: best recall@50 (9.26%) and best median rank (4633). NLL has 0 recall@1 and 0 recall@5 in the current benchmark—it improves ranks on average but does not guarantee top-5 hits. (3) **Gene-wise centering is essential** for z-score methods; without it, Gaussian calibration produces thousands of false positives per sample. (4) **Student-t is too conservative for discovery** (median outliers ~0), although it can occasionally recover a causal gene at top-1. (5) **kNN-Local fails on this fibroblast-homogeneous cohort** (0 recall across all K, inflated outliers median 159); it is designed for heterogeneous cohorts where tissue/batch stratification is meaningful. (6) **37M vs 147M**: The larger model yields fewer outliers at a stricter α but requires significantly more compute; for many applications, 37M with NB-Outrider is sufficient. (7) **Unified outliers browse** (Section 6.12): Gene rank and volcano plots support method selection for single-sample vs cohort interpretation.
+
+#### 6.10.1 Two-Stage Production Recommendation
+
+We recommend a **two-stage clinical stack** that separates retrieval and calibration objectives:
+
+| Stage | Method | Role |
+| :--- | :--- | :--- |
+| **Stage 1** | NLL deterministic-masked ranking | Sensitivity: top-10/top-50 causal gene retrieval for manual review or gene-panel prioritization |
+| **Stage 2** | NB-Outrider significance calling | Reportable calibrated outliers with controlled false discovery |
+
+**Rationale**: Retrieval (recall@K, median rank) and calibration (p-value validity, discovery inflation) optimize different objectives. NLL maximizes causal gene recovery in broader candidate lists but does not provide well-calibrated p-values; NB-Outrider provides statistically rigorous, reportable outlier calls but ranks causal genes less favorably on average. Combining both stages yields high sensitivity for prioritization (Stage 1) and defensible significance claims for reporting (Stage 2).
 
 ### 6.11 Detailed Case Analysis: Sample-Level Interpretation
 
@@ -696,7 +707,7 @@ The recall analysis reveals stark differences across methods. The following tabl
 
 **Figure 6.12.1.** Causal gene recall@K (left) and causal gene rank distribution (right) by calibration method. NB-Outrider, nb_approx, and Student-t achieve the only non-zero recall@1 (1.85%); kNN-Local and none achieve zero recall at K≤10.
 
-**Interpretation**: **kNN-Local** achieves **zero recall** at all K values and a median rank of 7709—the causal gene is never among the top outliers and is typically buried deep in the ranking. This failure likely reflects the homogeneous fibroblast cohort: local calibration restricts the null to embedding-space neighbors, which may dilute the signal when the cohort lacks meaningful stratification. **nb_outrider**, **nb_approx**, and **student_t** achieve the best recall at K≤5: 1.85% at K=1, 5, 10 (one causal sample recovered in top-1) and 5.56% at K=50 (three samples). **nll** achieves **the best overall performance on clinically relevant causal gene outlier detection**: highest recall@50 (9.26%, five samples recovered) and recall@10 (3.70%, two samples), and the **best median rank** (4633) among all methods—indicating that causal genes are ranked higher on average under NLL scoring. NLL does not place causal genes in the top-5 (zero recall@1 and recall@5), but its density-based pseudo-likelihood scoring elevates causal genes more effectively than z-score methods when considering broader candidate lists (top-10, top-50). **none** achieves 7.41% recall@50 and median rank 7208, second to NLL.
+**Interpretation**: **kNN-Local** achieves **zero recall** at all K values and a median rank of 7709—the causal gene is never among the top outliers and is typically buried deep in the ranking. This failure likely reflects the homogeneous fibroblast cohort: local calibration restricts the null to embedding-space neighbors, which may dilute the signal when the cohort lacks meaningful stratification. **nb_outrider**, **nb_approx**, and **student_t** achieve the best recall at K≤5: 1.85% at K=1, 5, 10 (one causal sample recovered in top-1) and 5.56% at K=50 (three samples). **nll** achieves **the best causal gene retrieval** among all methods: highest recall@50 (9.26%, five samples recovered) and recall@10 (3.70%, two samples), and the **best median rank** (4633)—indicating that causal genes are ranked higher on average under NLL scoring. NLL does not place causal genes in the top-5 (zero recall@1 and recall@5), but its density-based pseudo-likelihood scoring elevates causal genes more effectively than z-score methods when considering broader candidate lists (top-10, top-50). **none** achieves 7.41% recall@50 and median rank 7208, second to NLL.
 
 The low recall across all methods (1–2 samples in top-1 out of 54) reflects the inherent difficulty of causal gene recovery: transcriptomic anomalies may be subtle, confounded by batch or technical noise, or not fully captured by the model. The median rank of ~7709 for most methods indicates that causal genes are often buried in the middle of the ranking rather than at the top.
 
@@ -713,7 +724,7 @@ The method comparison table reports mean, median, and max outliers per sample, a
 | none | 92.21 | 45.5 | 1848 | 0.0000 | 0.0000 |
 | student_t | 0.03 | 0 | 2 | 0.0185 | 0.0185 |
 
-**kNN-Local** exhibits severe over-calling: median 159 outliers per sample, mean 190.66, max 686. This aligns with the discovery inflation reported in Section 6.1 (62×) and explains why kNN-Local achieves zero causal recall—the ranking is flooded with false positives, pushing true causal genes down. **none** (Gaussian) and **nll** also over-call (median 45.5 and 41 respectively), with none showing 56× discovery inflation. **nb_outrider** and **nb_approx** achieve a balanced profile: median 8 outliers, mean 23, with the best causal recall. **student_t** is extremely conservative: median 0 outliers, mean 0.03, max 2—it achieves the same recall as NB-Outrider but at the cost of almost no discoveries, limiting clinical utility.
+**kNN-Local** exhibits severe over-calling: median 159 outliers per sample, mean 190.66, max 686. This aligns with the discovery inflation reported in Section 6.1 (62×) and explains why kNN-Local achieves zero causal recall—the ranking is flooded with false positives, pushing true causal genes down. **none** (Gaussian) and **nll** also over-call (median 45.5 and 41 respectively), with none showing 56× discovery inflation. **nb_outrider** and **nb_approx** achieve a balanced profile: median 8 outliers, mean 23; they achieve the only non-zero recall at K=1 (1.85%). **student_t** is extremely conservative: median 0 outliers, mean 0.03, max 2—it achieves the same recall at K≤5 as NB-Outrider but at the cost of almost no discoveries, limiting clinical utility.
 
 #### 6.12.5 Volcano Plots: Single-Sample Interpretation
 
@@ -789,7 +800,7 @@ Observed-vs-predicted scatter plots for causal genes (e.g., EPG5, TIMMDC1) visua
 
 #### 6.12.10 Synthesis: Which Method Is Best and Why
 
-**Best overall: NB-Outrider for calibration; NLL for causal gene recovery.** The unified browse analysis reveals two complementary strengths. **NB-Outrider** is the preferred method when p-value calibration and controlled discovery are paramount: (1) best p-value calibration (KS 0.027); (2) balanced outlier counts (median 8, mean 23 per sample); (3) non-zero recall at K=1 (1.85%); (4) correct modeling of the count process. **NLL** (TabPFN-style pseudo-likelihood scoring) achieves **the best causal gene recall and ranking** among all methods: highest recall@50 (9.26%), highest recall@10 (3.70%), and the best median rank (4633). When the clinical goal is to maximize recovery of causal genes in broader candidate lists (e.g., top-50 for manual review or gene-panel prioritization), NLL outperforms NB-Outrider. NLL does not place causal genes in the top-5 and has higher outlier counts (median 41), so it is best used in conjunction with NB-Outrider: NB-Outrider for calibrated discovery, NLL for causal-gene-focused ranking when recall is prioritized. nb_approx matches NB-Outrider on recall and outlier counts but is an approximation; NB-Outrider is preferred when raw counts exist.
+**Best for calibration: NB-Outrider; best for causal gene retrieval: NLL.** The unified browse analysis reveals two complementary strengths. **NB-Outrider** is the best-calibrated caller when p-value validity and controlled discovery are paramount: (1) best p-value calibration (KS 0.027); (2) balanced outlier counts (median 8, mean 23 per sample); (3) non-zero recall at K=1 (1.85%); (4) correct modeling of the count process. **NLL** (TabPFN-style pseudo-likelihood scoring) achieves **the best causal gene recall and ranking** among all methods: highest recall@50 (9.26%), highest recall@10 (3.70%), and the best median rank (4633). When the clinical goal is to maximize recovery of causal genes in broader candidate lists (e.g., top-50 for manual review or gene-panel prioritization), NLL outperforms NB-Outrider. NLL has 0 recall@1 and 0 recall@5 and higher outlier counts (median 41), so it is best used in conjunction with NB-Outrider: NB-Outrider for calibrated discovery, NLL for causal-gene-focused ranking when recall is prioritized. nb_approx matches NB-Outrider on recall and outlier counts but is an approximation; NB-Outrider is preferred for calibration when raw counts exist.
 
 **When to use each method:**
 
@@ -1660,6 +1671,7 @@ When preparing a clinical report or publication, include:
 | 0.1 | 2026-03-12 | Initial draft, 187 lines |
 | 0.2 | 2026-03-12 | Expanded to 700+ lines (architecture, calibration, results, appendices) |
 | 0.3 | 2026-03-12 | Expanded to 2000+ lines: data provenance, run interpretations, figure index, Future Work, troubleshooting, method selection, reporting checklist |
+| 0.4 | 2026-03-18 | Clinical benchmarking alignment: updates reflect clinical_methods_comparison notebook and unified browse metrics. Distinguishes calibration quality (NB-Outrider best) vs causal gene retrieval (NLL best). Two-stage production recommendation, deterministic masking narrative, consistency audit. |
 
 ---
 
@@ -2204,4 +2216,4 @@ All paths are relative to the BulkFormer repository root.
 
 ---
 
-**Version**: Draft expanded to 2000+ lines. **Last updated**: 2026-03-12. **Line count**: Verified ≥ 2000.
+**Version**: 0.4. **Last updated**: 2026-03-18. Updates reflect clinical_methods_comparison notebook and unified browse metrics (Section 6.12).
