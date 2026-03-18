@@ -13,8 +13,8 @@ import pandas as pd
 
 DEFAULT_FILL_VALUE = -10.0
 DEFAULT_MISSING_GENE_LENGTH_BP = 1000.0
-DEFAULT_FPKM_CUTOFF = 1.0
-DEFAULT_FPKM_PERCENTILE = 0.95
+DEFAULT_FPKM_CUTOFF = 0.2
+DEFAULT_FPKM_PERCENTILE = 0.75
 DEFAULT_MIN_COUNTS_FRACTION = 0.01  # 1 per 100 samples
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BULKFORMER_GENE_INFO = REPO_ROOT / "data" / "bulkformer_gene_info.csv"
@@ -834,13 +834,13 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         "--fpkm-cutoff",
         type=float,
         default=DEFAULT_FPKM_CUTOFF,
-        help="FPKM cutoff for the percentile-based filter (default 1.0).",
+        help="FPKM cutoff for the percentile-based filter (default 0.2).",
     )
     parser.add_argument(
         "--fpkm-percentile",
         type=float,
         default=DEFAULT_FPKM_PERCENTILE,
-        help="Percentile for FPKM-based filtering (default 0.95).",
+        help="Percentile for FPKM-based filtering (default 0.75).",
     )
     parser.add_argument(
         "--min-counts-fraction",

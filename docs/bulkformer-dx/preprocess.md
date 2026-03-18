@@ -13,8 +13,8 @@
 ### Expression Filtering (Clinical)
 
 - `--expression-filter {none, outrider_like}`: Default is `outrider_like`.
-- `--fpkm-cutoff`: FPKM threshold (default 1.0).
-- `--fpkm-percentile`: Percentile for across-cohort FPKM filter (default 0.95).
+- `--fpkm-cutoff`: FPKM threshold (default 0.2; yields ~10–12k scored genes with or without exon-lengths).
+- `--fpkm-percentile`: Percentile for across-cohort FPKM filter (default 0.75; 95th was too stringent).
 - `--min-counts-fraction`: Minimum fraction of samples with non-zero counts (default 0.01 = 1 per 100).
 - `--minCounts-only`: Skip FPKM filter, only apply min-counts check.
 
@@ -25,7 +25,7 @@
 3. Applies the notebook TPM formula:
    `rate = counts / (gene_length_bp / 1000)`, `TPM = rate / sum(rate) * 1e6`, `log1p(TPM) = ln(TPM + 1)`.
 4. Performs OUTRIDER-like filtering:
-   - A gene passes if its `pth` percentile FPKM > `fpkmCutoff`.
+   - A gene passes if its `pth` percentile FPKM > `fpkmCutoff` (default 0.2, percentile 0.75).
    - A gene must also have non-zero counts in at least `ceil(n_samples * fraction)` samples.
 5. Aligns the matrix to `data/bulkformer_gene_info.csv` order.
 6. Exports a validity mask, expression filter diagnostics, and a JSON report.
