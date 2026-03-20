@@ -99,12 +99,23 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
+# Use Python 3 (project uses 3.9+ syntax). Prefer python3 over python.
+PYTHON=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON="python3"
+elif python --version 2>&1 | grep -q "Python 3"; then
+  PYTHON="python"
+else
+  echo "Error: Python 3 required. Install python3 or ensure 'python' is Python 3."
+  exit 1
+fi
+
 # External verification: do not trust the LLM to say "done". Use disk state + quality checks.
 run_verification() {
   cd "$REPO_ROOT" || return 1
 
   # 1) Quality checks: pytest if it runs tests, else compileall for key Python paths
-  if ! python -m pytest -q 2>/dev/null; then
+  if ! $PYTHON -m pytest -q 2>/dev/null; then
     local rc=$?
     # 0=pass, 1=fail, 2=no tests collected, 4=no tests run / interrupted
     if [[ $rc -eq 1 ]]; then
@@ -112,7 +123,12 @@ run_verification() {
       return 1
     fi
     for d in utils model bulkformer_dx; do
-      [[ -d "$d" ]] && python -m compileall -q "$d" 2>/dev/null || true
+      if [[ -d "$d" ]]; then
+        if ! $PYTHON -m compileall -q "$d" 2>/dev/null; then
+          echo "Verification: compileall failed for $d (use Python 3.9+)."
+          return 1
+        fi
+      fi
     done
   fi
 
