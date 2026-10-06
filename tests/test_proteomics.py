@@ -130,6 +130,7 @@ def test_run_train_and_predict_write_expected_outputs(
             already_log2=True,
             center_scale=False,
             alpha=0.05,
+            fold_groups=None,
             variant="37M",
             checkpoint_path=None,
             graph_path=None,
@@ -156,6 +157,10 @@ def test_run_train_and_predict_write_expected_outputs(
     assert summary["mode"] == "train"
     assert summary["proteins"] == 2
     assert summary["selected_genes"] == 2
+    assert summary["calibration_mode"] == "leave_sample_out"
+    artifact = proteomics.load_proteomics_artifact(artifact_path)
+    assert "null_stats" in artifact["feature_spec"]
+    assert "centers" in artifact["feature_spec"]["null_stats"]
 
     predict_expression = pd.DataFrame(
         {
@@ -201,6 +206,7 @@ def test_run_train_and_predict_write_expected_outputs(
             already_log2=True,
             center_scale=False,
             alpha=0.05,
+            fold_groups=None,
             variant="37M",
             checkpoint_path=None,
             graph_path=None,
@@ -214,11 +220,15 @@ def test_run_train_and_predict_write_expected_outputs(
     assert predict_exit_code == 0
     predictions = pd.read_csv(predict_output_dir / "predicted_proteomics.tsv", sep="\t")
     ranking = pd.read_csv(predict_output_dir / "ranked_proteins" / "sample_x.tsv", sep="\t")
+    predict_summary = json.loads(
+        (predict_output_dir / "prediction_summary.json").read_text(encoding="utf-8")
+    )
     assert predictions["sample_id"].tolist() == ["sample_x", "sample_y"]
     assert {"P1", "P2"} <= set(predictions.columns)
     assert {"protein_id", "predicted_log2_intensity", "p_value", "padj", "call"} <= set(
         ranking.columns
     )
+    assert predict_summary["calibration_mode"] == "frozen_reference_null"
 
 
 def test_predict_rejects_conflicting_checkpoint_variant(
@@ -290,6 +300,7 @@ def test_predict_rejects_conflicting_checkpoint_variant(
             already_log2=True,
             center_scale=False,
             alpha=0.05,
+            fold_groups=None,
             variant="37M",
             checkpoint_path=None,
             graph_path=None,
@@ -323,6 +334,7 @@ def test_predict_rejects_conflicting_checkpoint_variant(
                 already_log2=True,
                 center_scale=False,
                 alpha=0.05,
+                fold_groups=None,
                 variant="147M",
                 checkpoint_path=None,
                 graph_path=None,
@@ -332,3 +344,24 @@ def test_predict_rejects_conflicting_checkpoint_variant(
                 device="cpu",
             )
         )
+
+
+def test_calibrate_uses_frozen_null_not_scored_matrix() -> None:
+    """Scored residuals must not widen/refit the null (clinical anti-leak)."""
+    reference = pd.DataFrame(
+        np.array([[0.0, 0.0], [0.1, -0.1], [-0.1, 0.1], [0.05, -0.05]], dtype=np.float32),
+        columns=["P1", "P2"],
+    )
+    null_stats = proteomics.fit_proteomics_null(reference)
+    # Extreme scored residual that would dominate median/MAD if the null were refit.
+    scored = pd.DataFrame(
+        np.array([[10.0, 10.0]], dtype=np.float32),
+        index=["query"],
+        columns=["P1", "P2"],
+    )
+    p_frozen, _ = proteomics.calibrate_proteomics_residuals(scored, null_stats=null_stats)
+    leaked_null = proteomics.fit_proteomics_null(pd.concat([reference, scored], axis=0))
+    p_leaked, _ = proteomics.calibrate_proteomics_residuals(scored, null_stats=leaked_null)
+    assert float(p_frozen.loc["query", "P1"]) < float(p_leaked.loc["query", "P1"])
+    with pytest.raises(ValueError, match="null_stats"):
+        proteomics.calibrate_proteomics_residuals(scored, null_stats={})

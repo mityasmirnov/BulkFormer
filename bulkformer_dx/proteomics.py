@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
-from math import erfc, sqrt
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from bulkformer_dx.anomaly.calibration import benjamini_yekutieli
 from bulkformer_dx.anomaly.scoring import load_aligned_expression
 from bulkformer_dx.bulkformer_model import extract_sample_embeddings, load_bulkformer_model
+from bulkformer_dx.calibration.pvalues import zscore_two_sided_pvalue
 from bulkformer_dx.tissue import resolve_selected_gene_ids
 
 SUPPORTED_MODES = ("train", "predict")
@@ -32,6 +32,7 @@ DEFAULT_HIDDEN_DIM = 256
 DEFAULT_VAL_FRACTION = 0.2
 DEFAULT_PATIENCE = 10
 DEFAULT_ALPHA = 0.05
+DEFAULT_STUDENT_T_DOF_FALLBACK = 30.0
 
 
 @dataclass(slots=True)
@@ -390,24 +391,77 @@ def _proteinwise_robust_statistics(residuals: np.ndarray) -> tuple[np.ndarray, n
     return centers.astype(np.float32), scales.astype(np.float32)
 
 
+def _estimate_t_dof_column(resid_col: np.ndarray, *, lo: float = 3.0, hi: float = 30.0) -> float:
+    """Moment Student-t dof from one protein's reference residuals; hi when underdetermined."""
+    finite = resid_col[np.isfinite(resid_col)]
+    if finite.size < 5:
+        return hi
+    variance = float(finite.var())
+    if variance <= 0:
+        return hi
+    excess_kurt = float(np.mean((finite - finite.mean()) ** 4) / (variance**2) - 3.0)
+    if excess_kurt <= 0.05:
+        return hi
+    return float(min(hi, max(lo, 4.0 + 6.0 / excess_kurt)))
+
+
+def fit_proteomics_null(residuals: np.ndarray | pd.DataFrame) -> dict[str, Any]:
+    """Fit protein-wise median/MAD + Student-t dof on reference residuals only."""
+    values = (
+        residuals.to_numpy(dtype=np.float32, copy=True)
+        if isinstance(residuals, pd.DataFrame)
+        else np.asarray(residuals, dtype=np.float32)
+    )
+    if values.ndim != 2 or values.shape[0] == 0:
+        raise ValueError("Null fitting requires a non-empty sample-by-protein residual matrix.")
+    centers, scales = _proteinwise_robust_statistics(values)
+    dof = np.asarray(
+        [_estimate_t_dof_column(values[:, col_idx]) for col_idx in range(values.shape[1])],
+        dtype=np.float32,
+    )
+    return {
+        "centers": centers.tolist(),
+        "scales": scales.tolist(),
+        "dof": dof.tolist(),
+        "n_reference_samples": int(values.shape[0]),
+        "residual_tail": "student_t_moment_dof",
+    }
+
+
 def calibrate_proteomics_residuals(
     residuals: pd.DataFrame,
     *,
+    null_stats: dict[str, Any],
     alpha: float = DEFAULT_ALPHA,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Compute protein-wise robust p-values and per-sample BY-adjusted q-values."""
+    """Score residuals with a frozen reference null (never refit on the scored matrix)."""
     if not 0 < alpha < 1:
         raise ValueError("alpha must lie in the interval (0, 1).")
+    if not null_stats:
+        raise ValueError("null_stats is required; do not fit the null on scored residuals.")
 
     residual_values = residuals.to_numpy(dtype=np.float32, copy=True)
-    centers, scales = _proteinwise_robust_statistics(residual_values)
-    z_scores = (residual_values - centers) / scales
-    p_values = np.full(z_scores.shape, np.nan, dtype=np.float32)
-    finite_mask = np.isfinite(z_scores)
-    p_values[finite_mask] = np.asarray(
-        [erfc(abs(float(z_value)) / sqrt(2.0)) for z_value in z_scores[finite_mask]],
+    centers = np.asarray(null_stats["centers"], dtype=np.float32)
+    scales = np.asarray(null_stats["scales"], dtype=np.float32)
+    dof = np.asarray(
+        null_stats.get("dof", [DEFAULT_STUDENT_T_DOF_FALLBACK] * residual_values.shape[1]),
         dtype=np.float32,
     )
+    if centers.shape[0] != residual_values.shape[1] or scales.shape[0] != residual_values.shape[1]:
+        raise ValueError("null_stats protein width does not match the scored residual matrix.")
+
+    z_scores = (residual_values - centers) / scales
+    p_values = np.full(z_scores.shape, np.nan, dtype=np.float32)
+    for col_idx in range(z_scores.shape[1]):
+        finite_mask = np.isfinite(z_scores[:, col_idx])
+        if not finite_mask.any():
+            continue
+        col_dof = float(dof[col_idx]) if col_idx < dof.shape[0] else DEFAULT_STUDENT_T_DOF_FALLBACK
+        p_values[finite_mask, col_idx] = zscore_two_sided_pvalue(
+            z_scores[finite_mask, col_idx],
+            use_student_t=True,
+            student_t_df=col_dof if col_dof > 0 else DEFAULT_STUDENT_T_DOF_FALLBACK,
+        ).astype(np.float32)
     q_values = np.full(p_values.shape, np.nan, dtype=np.float32)
     for row_idx in range(p_values.shape[0]):
         finite_row = np.isfinite(p_values[row_idx])
@@ -419,11 +473,87 @@ def calibrate_proteomics_residuals(
     )
 
 
+def load_fold_groups(path: Path, sample_ids: list[str]) -> np.ndarray:
+    """Load sample_id→group_id map; missing IDs fall back to their own sample_id group."""
+    table = _read_table(path)
+    if table.shape[1] < 2:
+        raise ValueError("fold-groups table needs columns sample_id and group_id.")
+    sample_col, group_col = str(table.columns[0]), str(table.columns[1])
+    mapping = {
+        str(row[sample_col]): str(row[group_col])
+        for _, row in table.iterrows()
+    }
+    return np.asarray([mapping.get(sample_id, sample_id) for sample_id in sample_ids], dtype=object)
+
+
+def outer_group_oof_predictions(
+    sample_embeddings: np.ndarray,
+    targets: np.ndarray,
+    group_ids: np.ndarray,
+    *,
+    train_kwargs: dict[str, Any],
+    transform_stats: dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+    """Train/score under leave-group-out folds; null fitted on each fold's train residuals only."""
+    features = np.asarray(sample_embeddings, dtype=np.float32)
+    target_values = np.asarray(targets, dtype=np.float32)
+    groups = np.asarray(group_ids, dtype=object)
+    if features.shape[0] != target_values.shape[0] or features.shape[0] != groups.shape[0]:
+        raise ValueError("embeddings, targets, and group_ids must share the sample axis.")
+
+    n_samples, n_proteins = target_values.shape
+    oof_pred = np.full((n_samples, n_proteins), np.nan, dtype=np.float32)
+    oof_p = np.full((n_samples, n_proteins), np.nan, dtype=np.float32)
+    oof_q = np.full((n_samples, n_proteins), np.nan, dtype=np.float32)
+    unique_groups = pd.unique(groups)
+    mode = "leave_group_out" if unique_groups.size < n_samples else "leave_sample_out"
+    observed_report = invert_transformed_targets(target_values, transform_stats=transform_stats)
+
+    for group in unique_groups:
+        test_mask = groups == group
+        train_mask = ~test_mask
+        if int(train_mask.sum()) < 2:
+            continue
+        head = train_proteomics_head(
+            features[train_mask],
+            target_values[train_mask],
+            **train_kwargs,
+        )
+        train_pred = invert_transformed_targets(
+            predict_proteomics_targets(
+                head.model,
+                features[train_mask],
+                batch_size=int(train_kwargs.get("batch_size", DEFAULT_BATCH_SIZE)),
+                device=train_kwargs.get("device", "cpu"),
+            ),
+            transform_stats=transform_stats,
+        )
+        test_pred = invert_transformed_targets(
+            predict_proteomics_targets(
+                head.model,
+                features[test_mask],
+                batch_size=int(train_kwargs.get("batch_size", DEFAULT_BATCH_SIZE)),
+                device=train_kwargs.get("device", "cpu"),
+            ),
+            transform_stats=transform_stats,
+        )
+        null_stats = fit_proteomics_null(observed_report[train_mask] - train_pred)
+        test_resid = pd.DataFrame(observed_report[test_mask] - test_pred)
+        p_fold, q_fold = calibrate_proteomics_residuals(test_resid, null_stats=null_stats)
+        oof_pred[test_mask] = test_pred
+        oof_p[test_mask] = p_fold.to_numpy(dtype=np.float32)
+        oof_q[test_mask] = q_fold.to_numpy(dtype=np.float32)
+    return oof_pred, oof_p, oof_q, mode
+
+
 def build_ranked_protein_tables(
     predicted: pd.DataFrame,
     observed: pd.DataFrame | None,
     *,
     alpha: float = DEFAULT_ALPHA,
+    null_stats: dict[str, Any] | None = None,
+    p_values: pd.DataFrame | None = None,
+    q_values: pd.DataFrame | None = None,
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | None, pd.DataFrame | None]:
     """Build per-sample ranked protein residual tables."""
     if observed is None:
@@ -439,7 +569,14 @@ def build_ranked_protein_tables(
         return ranked, None, None
 
     residuals = observed - predicted
-    p_values, q_values = calibrate_proteomics_residuals(residuals, alpha=alpha)
+    if p_values is None or q_values is None:
+        if null_stats is None:
+            raise ValueError(
+                "Clinical protein p-values require frozen null_stats or precomputed OOF p/q."
+            )
+        p_values, q_values = calibrate_proteomics_residuals(
+            residuals, null_stats=null_stats, alpha=alpha
+        )
     ranked_tables: dict[str, pd.DataFrame] = {}
     for sample_id in predicted.index:
         sample_ranked = pd.DataFrame(
@@ -555,8 +692,9 @@ def save_proteomics_artifact(
     aggregation: str,
     transform_stats: dict[str, Any],
     model_contract: dict[str, str | None],
+    null_stats: dict[str, Any],
 ) -> Path:
-    """Persist the trained proteomics head and its feature contract."""
+    """Persist the trained proteomics head, feature contract, and frozen residual null."""
     output_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = output_dir / "protein_head.pt"
     torch.save(
@@ -573,6 +711,7 @@ def save_proteomics_artifact(
                 "aggregation": aggregation,
                 "transform_stats": transform_stats,
                 "model_contract": model_contract,
+                "null_stats": null_stats,
             },
         },
         artifact_path,
@@ -691,6 +830,12 @@ def _run_prediction_from_artifact(
     predicted_values = invert_transformed_targets(predicted_values, transform_stats=transform_stats)
     protein_ids = [str(protein_id) for protein_id in feature_spec["protein_ids"]]
     predicted = pd.DataFrame(predicted_values, index=expression.index, columns=protein_ids)
+    null_stats = feature_spec.get("null_stats")
+    if not isinstance(null_stats, dict) or "centers" not in null_stats:
+        raise ValueError(
+            f"Proteomics artifact at {artifact_path} is missing frozen null_stats; "
+            "retrain the protein head before clinical predict scoring."
+        )
 
     observed_log2: pd.DataFrame | None = None
     if observed_proteomics is not None:
@@ -709,6 +854,7 @@ def _run_prediction_from_artifact(
         predicted,
         observed_log2,
         alpha=args.alpha,
+        null_stats=null_stats,
     )
     metrics = {
         **artifact.get("metrics", {}),
@@ -716,6 +862,8 @@ def _run_prediction_from_artifact(
         "proteins": int(predicted.shape[1]),
         "mode": "predict",
         "artifact_path": str(artifact_path),
+        "calibration_mode": "frozen_reference_null",
+        "residual_tail": null_stats.get("residual_tail", "student_t_moment_dof"),
     }
     return predicted, observed_log2, ranked_tables, metrics, residuals, q_values
 
@@ -834,6 +982,13 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         default=DEFAULT_ALPHA,
         help="BY-adjusted significance threshold for protein calls.",
     )
+    parser.add_argument(
+        "--fold-groups",
+        help=(
+            "Optional TSV with sample_id and group_id (person/family/plex). "
+            "Train-mode clinical ranks use leave-group-out; default is leave-sample-out."
+        ),
+    )
     parser.add_argument("--variant", help="Preferred BulkFormer checkpoint variant.")
     parser.add_argument("--checkpoint-path", help="Explicit BulkFormer checkpoint path.")
     parser.add_argument("--graph-path", help="Optional BulkFormer graph asset path.")
@@ -880,20 +1035,36 @@ def run(args: argparse.Namespace) -> int:
             already_log2=args.already_log2,
             center_scale=args.center_scale,
         )
+        target_matrix = transformed_targets.to_numpy(dtype=np.float32)
+        train_kwargs = {
+            "head_type": args.head_type,
+            "hidden_dim": args.hidden_dim,
+            "epochs": args.epochs,
+            "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
+            "batch_size": args.batch_size,
+            "val_fraction": args.val_fraction,
+            "patience": args.patience,
+            "random_seed": args.random_seed,
+            "device": args.device,
+        }
         head_result = train_proteomics_head(
             sample_embeddings,
-            transformed_targets.to_numpy(dtype=np.float32),
-            head_type=args.head_type,
-            hidden_dim=args.hidden_dim,
-            epochs=args.epochs,
-            learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay,
-            batch_size=args.batch_size,
-            val_fraction=args.val_fraction,
-            patience=args.patience,
-            random_seed=args.random_seed,
-            device=args.device,
+            target_matrix,
+            **train_kwargs,
         )
+        # Inductive null: report-space residuals of the final head on its training cohort.
+        reference_pred = invert_transformed_targets(
+            predict_proteomics_targets(
+                head_result.model,
+                sample_embeddings,
+                batch_size=args.batch_size,
+                device=args.device,
+            ),
+            transform_stats=transform_stats,
+        )
+        observed_report = invert_transformed_targets(target_matrix, transform_stats=transform_stats)
+        null_stats = fit_proteomics_null(observed_report - reference_pred)
         artifact_path = save_proteomics_artifact(
             head_result,
             Path(args.output_dir),
@@ -902,27 +1073,35 @@ def run(args: argparse.Namespace) -> int:
             aggregation=args.aggregation,
             transform_stats=transform_stats,
             model_contract=model_contract,
+            null_stats=null_stats,
         )
-        predicted_values = predict_proteomics_targets(
-            head_result.model,
+        sample_ids = [str(sample_id) for sample_id in proteomics.index]
+        if getattr(args, "fold_groups", None):
+            group_ids = load_fold_groups(Path(args.fold_groups), sample_ids)
+        else:
+            # ponytail: LOSO default; pass --fold-groups for person/family/plex blocks.
+            group_ids = np.asarray(sample_ids, dtype=object)
+        oof_pred, oof_p, oof_q, fold_mode = outer_group_oof_predictions(
             sample_embeddings,
-            batch_size=args.batch_size,
-            device=args.device,
+            target_matrix,
+            group_ids,
+            train_kwargs=train_kwargs,
+            transform_stats=transform_stats,
         )
-        predicted_values = invert_transformed_targets(predicted_values, transform_stats=transform_stats)
         observed_log2 = pd.DataFrame(
-            invert_transformed_targets(
-                transformed_targets.to_numpy(dtype=np.float32),
-                transform_stats=transform_stats,
-            ),
+            observed_report,
             index=proteomics.index,
             columns=proteomics.columns,
         )
-        predicted = pd.DataFrame(predicted_values, index=proteomics.index, columns=proteomics.columns)
+        predicted = pd.DataFrame(oof_pred, index=proteomics.index, columns=proteomics.columns)
+        p_values = pd.DataFrame(oof_p, index=proteomics.index, columns=proteomics.columns)
+        q_values = pd.DataFrame(oof_q, index=proteomics.index, columns=proteomics.columns)
         ranked_tables, residuals, q_values = build_ranked_protein_tables(
             predicted,
             observed_log2,
             alpha=args.alpha,
+            p_values=p_values,
+            q_values=q_values,
         )
         metrics = {
             **head_result.metrics,
@@ -930,6 +1109,9 @@ def run(args: argparse.Namespace) -> int:
             "aggregation": args.aggregation,
             "selected_genes": len(selected_gene_ids),
             "alpha": args.alpha,
+            "calibration_mode": fold_mode,
+            "residual_tail": null_stats.get("residual_tail", "student_t_moment_dof"),
+            "null_reference_samples": null_stats.get("n_reference_samples"),
         }
         write_proteomics_outputs(
             output_dir=Path(args.output_dir),
