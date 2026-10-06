@@ -1,5 +1,13 @@
 # BulkFormer Agent Notes
 
+## CowRD submodule
+
+This repository is pinned inside [`mityasmirnov/cowrd`](https://github.com/mityasmirnov/cowrd) as the **`BulkFormer/`** git submodule (same pattern as `PROTRIDER/` and `cowrd-platform/`).
+
+- **CowRD diagnostic entrypoint:** [`bulkformer_dx/`](bulkformer_dx/) — masked anomaly scoring, calibration, benchmarks, RNA→protein heads. Do **not** relocate this package under cowrd `Scripts/`; it shares model loaders and vocabulary with this repo.
+- **Parent docs:** cowrd [`docs/12-submodules.md`](https://github.com/mityasmirnov/cowrd/blob/main/docs/12-submodules.md), Update 11 strategy/plan under `docs/19-beyond-outrider-protrider-strategy.md` and `docs/superpowers/plans/2026-10-06-beyond-outrider-protrider.md`.
+- After commits here: `git push origin main`, then in cowrd bump the submodule pointer and push.
+
 ## Ralph (default workflow)
 
 - **Ralph is the default** for rollout work: run `./scripts/ralph/ralph.sh [N]` from the repo root. It uses the **Cursor CLI** (`agent`) by default; each iteration gets fresh context; progress lives in git and `scripts/ralph/prd.json` / `progress.txt`.
