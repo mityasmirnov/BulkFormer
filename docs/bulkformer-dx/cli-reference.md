@@ -151,6 +151,8 @@ Main arguments:
 - `--log2-transform` or `--already-log2`
 - `--center-scale`
 - `--alpha`
+- `--sample-embeddings`: optional precomputed sample embedding TSV (skips BulkFormer load; ~laptop RAM)
+- `--batch-size`: embedding extract micro-batch (peak VRAM ≈ 0.3 GiB at 1, ≈1.6 GiB at 8 for 37M)
 
 Outputs:
 

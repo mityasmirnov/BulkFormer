@@ -410,7 +410,8 @@ def _run_batches(
         raise ValueError("Batch size must be positive.")
 
     target_device = device or next(model.parameters()).device
-    tensor = expression_to_tensor(expression, device=target_device)
+    # Keep the full cohort on CPU; only the active micro-batch touches the GPU.
+    tensor = expression_to_tensor(expression, device="cpu")
     outputs: list[torch.Tensor] = []
 
     n_batches = (tensor.shape[0] + batch_size - 1) // batch_size
@@ -422,7 +423,7 @@ def _run_batches(
             unit="batch",
             leave=False,
         ):
-            batch = tensor[start_idx : start_idx + batch_size]
+            batch = tensor[start_idx : start_idx + batch_size].to(target_device, non_blocking=True)
             batch_output = model(batch, mask_prob=mask_prob, output_expr=output_expr)
             outputs.append(batch_output.detach().cpu())
 

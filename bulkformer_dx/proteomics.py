@@ -659,6 +659,27 @@ def _resolve_prediction_model_kwargs(
     return resolved
 
 
+def load_sample_embeddings_table(path: Path, sample_ids: list[str]) -> np.ndarray:
+    """Load a sample_id × dim embedding TSV aligned to ``sample_ids`` order."""
+    table = _read_table(path)
+    if table.empty:
+        raise ValueError(f"Sample embeddings table is empty: {path}")
+    sample_column = str(table.columns[0])
+    table = table.set_index(sample_column)
+    table.index = table.index.astype(str)
+    missing = [sample_id for sample_id in sample_ids if sample_id not in table.index]
+    if missing:
+        preview = ", ".join(missing[:5])
+        raise ValueError(
+            f"Sample embeddings at {path} missing {len(missing)} required sample_ids "
+            f"(e.g. {preview})."
+        )
+    aligned = table.loc[sample_ids].apply(pd.to_numeric, errors="coerce")
+    if aligned.isna().any().any():
+        raise ValueError(f"Sample embeddings at {path} contain non-numeric values.")
+    return aligned.to_numpy(dtype=np.float32)
+
+
 def extract_proteomics_embeddings(
     expression: pd.DataFrame,
     *,
@@ -672,15 +693,22 @@ def extract_proteomics_embeddings(
     gene_indices = expression.columns.get_indexer(selected_gene_ids).tolist()
     if any(gene_index < 0 for gene_index in gene_indices):
         raise ValueError("Selected proteomics genes could not be aligned to the expression matrix.")
-    embeddings = extract_sample_embeddings(
-        loaded_model.model,
-        expression,
-        batch_size=batch_size,
-        aggregation=aggregation,
-        device=loaded_model.device,
-        gene_indices=gene_indices,
-    )
-    return embeddings, _resolve_model_contract(loaded_model, model_kwargs)
+    try:
+        embeddings = extract_sample_embeddings(
+            loaded_model.model,
+            expression,
+            batch_size=batch_size,
+            aggregation=aggregation,
+            device=loaded_model.device,
+            gene_indices=gene_indices,
+        )
+        contract = _resolve_model_contract(loaded_model, model_kwargs)
+    finally:
+        # Release foundation weights before the tiny protein head trains.
+        del loaded_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    return embeddings, contract
 
 
 def save_proteomics_artifact(
@@ -989,6 +1017,13 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
             "Train-mode clinical ranks use leave-group-out; default is leave-sample-out."
         ),
     )
+    parser.add_argument(
+        "--sample-embeddings",
+        help=(
+            "Optional precomputed sample_id × dim embedding TSV. Skips BulkFormer "
+            "load (laptop-friendly); head training only needs a few hundred MiB."
+        ),
+    )
     parser.add_argument("--variant", help="Preferred BulkFormer checkpoint variant.")
     parser.add_argument("--checkpoint-path", help="Explicit BulkFormer checkpoint path.")
     parser.add_argument("--graph-path", help="Optional BulkFormer graph asset path.")
@@ -1022,13 +1057,29 @@ def run(args: argparse.Namespace) -> int:
             expression,
             valid_gene_mask_path=getattr(args, "valid_gene_mask", None),
         )
-        sample_embeddings, model_contract = extract_proteomics_embeddings(
-            expression,
-            selected_gene_ids=selected_gene_ids,
-            aggregation=args.aggregation,
-            batch_size=args.batch_size,
-            model_kwargs=model_kwargs,
-        )
+        sample_ids_for_emb = [str(sample_id) for sample_id in proteomics.index]
+        if getattr(args, "sample_embeddings", None):
+            sample_embeddings = load_sample_embeddings_table(
+                Path(args.sample_embeddings),
+                sample_ids_for_emb,
+            )
+            model_contract = {
+                "variant": getattr(args, "variant", None) or "precomputed",
+                "checkpoint_path": None,
+                "graph_path": None,
+                "graph_weights_path": None,
+                "gene_embedding_path": None,
+                "gene_info_path": None,
+                "sample_embeddings_path": str(Path(args.sample_embeddings).resolve()),
+            }
+        else:
+            sample_embeddings, model_contract = extract_proteomics_embeddings(
+                expression,
+                selected_gene_ids=selected_gene_ids,
+                aggregation=args.aggregation,
+                batch_size=args.batch_size,
+                model_kwargs=model_kwargs,
+            )
         transformed_targets, transform_stats = transform_proteomics_targets(
             proteomics,
             log2_transform=args.log2_transform,
