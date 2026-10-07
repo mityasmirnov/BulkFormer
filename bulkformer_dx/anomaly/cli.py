@@ -192,8 +192,20 @@ def register_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
     head_parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
-        help="Batch size used for frozen BulkFormer feature extraction and head training.",
+        default=8,
+        help="Micro-batch for frozen BulkFormer feature extraction (VRAM-bound).",
+    )
+    head_parser.add_argument(
+        "--train-batch-size",
+        type=int,
+        default=2048,
+        help="Batch size for head MLP training after features are on CPU/GPU.",
+    )
+    head_parser.add_argument(
+        "--max-train-examples",
+        type=int,
+        default=500_000,
+        help="Subsample flattened gene examples for head training (0 = use all).",
     )
     head_parser.add_argument(
         "--hidden-dim",

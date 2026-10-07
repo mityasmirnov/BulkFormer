@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import os
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from bulkformer_dx.bulkformer_model import (
     extract_gene_embeddings,
+    extract_sample_embeddings,
     load_bulkformer_model,
     predict_expression,
 )
@@ -219,8 +222,13 @@ def train_head_model(
     random_seed: int = 0,
     device: str | torch.device = "cpu",
     min_sigma: float = DEFAULT_MIN_SIGMA,
+    checkpoint_dir: Path | None = None,
 ) -> TrainedAnomalyHead:
-    """Train a small head on frozen BulkFormer features."""
+    """Train a small head on frozen BulkFormer features.
+
+    When ``checkpoint_dir`` is set, writes ``last.pt`` every epoch and ``best.pt``
+    on train-loss improvement. SIGINT/SIGTERM flushes ``last.pt`` then exits 130.
+    """
     resolved_mode = _validate_mode(mode)
     feature_matrix = np.asarray(features, dtype=np.float32)
     target_vector = np.asarray(targets, dtype=np.float32).reshape(-1)
@@ -263,27 +271,66 @@ def train_head_model(
         generator=generator,
     )
 
-    for _epoch_idx in range(epochs):
-        model.train()
-        for batch_features, batch_targets in loader:
-            batch_features = batch_features.to(resolved_device)
-            batch_targets = batch_targets.to(resolved_device)
-            optimizer.zero_grad(set_to_none=True)
-            outputs = model(batch_features)
-            if resolved_mode == "sigma_nll":
-                predicted_mean = outputs[:, 0]
-                predicted_log_sigma = outputs[:, 1]
-                loss = gaussian_nll_loss(
-                    predicted_mean,
-                    predicted_log_sigma,
-                    batch_targets,
-                    min_sigma=min_sigma,
-                )
-            else:
-                logits = outputs[:, 0]
-                loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, batch_targets)
-            loss.backward()
-            optimizer.step()
+    interrupt = {"flag": False}
+
+    def _handle(signum: int, _frame: Any) -> None:
+        interrupt["flag"] = True
+        print(f"anomaly_head: signal {signum}; will save last.pt after epoch", flush=True)
+
+    prev_int = signal.signal(signal.SIGINT, _handle)
+    prev_term = signal.signal(signal.SIGTERM, _handle)
+    best_loss = float("inf")
+    ckpt_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
+    try:
+        for epoch_idx in range(epochs):
+            model.train()
+            epoch_losses: list[float] = []
+            for batch_features, batch_targets in loader:
+                batch_features = batch_features.to(resolved_device)
+                batch_targets = batch_targets.to(resolved_device)
+                optimizer.zero_grad(set_to_none=True)
+                outputs = model(batch_features)
+                if resolved_mode == "sigma_nll":
+                    predicted_mean = outputs[:, 0]
+                    predicted_log_sigma = outputs[:, 1]
+                    loss = gaussian_nll_loss(
+                        predicted_mean,
+                        predicted_log_sigma,
+                        batch_targets,
+                        min_sigma=min_sigma,
+                    )
+                else:
+                    logits = outputs[:, 0]
+                    loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, batch_targets)
+                loss.backward()
+                optimizer.step()
+                epoch_losses.append(float(loss.detach().cpu()))
+            mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("inf")
+            if ckpt_dir is not None:
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "mode": resolved_mode,
+                    "epoch": epoch_idx,
+                    "train_loss": mean_loss,
+                    "input_dim": input_dim,
+                    "hidden_dim": hidden_dim,
+                    "state_dict": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+                }
+                torch.save(payload, ckpt_dir / "last.pt")
+                if mean_loss < best_loss:
+                    best_loss = mean_loss
+                    torch.save(payload, ckpt_dir / "best.pt")
+                    print(f"epoch {epoch_idx}: best train_loss={mean_loss:.6f}", flush=True)
+            if interrupt["flag"]:
+                raise SystemExit(130)
+    finally:
+        signal.signal(signal.SIGINT, prev_int)
+        signal.signal(signal.SIGTERM, prev_term)
+
+    # Prefer best weights when available.
+    if ckpt_dir is not None and (ckpt_dir / "best.pt").is_file():
+        best_payload = torch.load(ckpt_dir / "best.pt", map_location="cpu", weights_only=False)
+        model.load_state_dict(best_payload["state_dict"])
 
     model.eval()
     with torch.inference_mode():
@@ -379,28 +426,65 @@ def run(args: argparse.Namespace) -> int:
         attr_value = getattr(args, attr_name, None)
         if attr_value is not None:
             model_kwargs[attr_name] = attr_value
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     loaded_model = load_bulkformer_model(**model_kwargs)
 
     resolved_mode = _validate_mode(getattr(args, "mode", DEFAULT_HEAD_MODE))
-    observed_expression = expression.to_numpy(dtype=np.float32, copy=True)
-    if resolved_mode == "sigma_nll":
-        features, targets = prepare_sigma_nll_training_data(
-            observed_expression,
-            valid_gene_flags,
-            loaded_model=loaded_model,
-            batch_size=args.batch_size,
-        )
-    else:
-        features, targets = prepare_injected_outlier_training_data(
-            observed_expression,
-            valid_gene_flags,
-            loaded_model=loaded_model,
-            batch_size=args.batch_size,
-            injection_rate=args.injection_rate,
-            outlier_scale=args.outlier_scale,
-            random_seed=args.random_seed,
-        )
+    gene_indices = np.where(valid_gene_flags)[0].tolist()
+    sample_emb = extract_sample_embeddings(
+        loaded_model.model,
+        expression,
+        batch_size=args.batch_size,
+        aggregation="mean",
+        device=loaded_model.device,
+        gene_indices=gene_indices,
+    )
+    # Local import avoids embeddings ↔ anomaly circular import at module load.
+    from bulkformer_dx.embeddings import write_embeddings_dataframe
 
+    emb_path = write_embeddings_dataframe(
+        sample_emb,
+        expression.index,
+        output_dir / "sample_embeddings.best.tsv",
+    )
+    print(f"Wrote best sample embeddings to {emb_path}", flush=True)
+
+    observed_expression = expression.to_numpy(dtype=np.float32, copy=True)
+    try:
+        if resolved_mode == "sigma_nll":
+            features, targets = prepare_sigma_nll_training_data(
+                observed_expression,
+                valid_gene_flags,
+                loaded_model=loaded_model,
+                batch_size=args.batch_size,
+            )
+        else:
+            features, targets = prepare_injected_outlier_training_data(
+                observed_expression,
+                valid_gene_flags,
+                loaded_model=loaded_model,
+                batch_size=args.batch_size,
+                injection_rate=args.injection_rate,
+                outlier_scale=args.outlier_scale,
+                random_seed=args.random_seed,
+            )
+    finally:
+        del loaded_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    max_examples = int(getattr(args, "max_train_examples", 0) or 0)
+    if max_examples > 0 and features.shape[0] > max_examples:
+        # ponytail: full flattened gene×sample table is ~3M rows; subsample for
+        # laptop/overnight wall-clock. Raise --max-train-examples 0 for full.
+        rng = np.random.default_rng(int(getattr(args, "random_seed", 0)))
+        pick = rng.choice(features.shape[0], size=max_examples, replace=False)
+        features = features[pick]
+        targets = targets[pick]
+        print(f"Subsampled head training to {max_examples} examples", flush=True)
+
+    train_batch = int(getattr(args, "train_batch_size", None) or args.batch_size)
     head_result = train_head_model(
         features,
         targets,
@@ -409,12 +493,14 @@ def run(args: argparse.Namespace) -> int:
         epochs=args.epochs,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        batch_size=args.batch_size,
+        batch_size=train_batch,
         random_seed=args.random_seed,
         device=args.device,
         min_sigma=args.min_sigma,
+        checkpoint_dir=output_dir / "checkpoints",
     )
-    checkpoint_path, metrics_path = save_trained_head(head_result, Path(args.output_dir))
+    checkpoint_path, metrics_path = save_trained_head(head_result, output_dir)
     print(f"Wrote {resolved_mode} head checkpoint to {checkpoint_path}")
     print(f"Wrote training metrics to {metrics_path}")
+    print(f"Epoch checkpoints: {output_dir / 'checkpoints'}/{{best,last}}.pt")
     return 0
